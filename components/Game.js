@@ -38,8 +38,12 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     if (myPlayerId !== null) {
         const sessionData = { roomCode, playerCount, playerName, myPlayerId };
         localStorage.setItem('tysiacha-session', JSON.stringify(sessionData));
+        // Save the last room the user actively played in
+        if (!isSpectator) {
+          localStorage.setItem('tysiacha-lastRoom', roomCode);
+        }
     }
-  }, [myPlayerId, roomCode, playerCount, playerName]);
+  }, [myPlayerId, roomCode, playerCount, playerName, isSpectator]);
 
   const publishState = useCallback((newState) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
