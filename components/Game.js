@@ -544,7 +544,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
         offline: { text: 'подключается', color: 'text-gray-400' },
     };
     const { text, color } = statusMap[player.status] || statusMap.offline;
-    return React.createElement('span', { className: `text-xs ml-1 ${color}` }, `(${text})`);
+    return React.createElement('span', { className: `text-xs ${color}` }, `(${text})`);
   };
 
   if (connectionStatus !== 'connected' || !gameState) {
@@ -622,7 +622,10 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
                         ? (index === firstAvailableSlotIndex && myPlayerId === null && !isSpectator)
                           ? React.createElement('button', { onClick: () => handleJoin(index), className: "w-full h-full bg-green-600 hover:bg-green-700 font-bold text-white transition-colors" }, "Войти")
                           : React.createElement('span', { className: "px-2 text-gray-400" }, `Место ${index + 1}`)
-                        : React.createElement('div', null, React.createElement('span', { className: "px-2" }, player.name), React.createElement(PlayerStatus, { player: player }))
+                        : React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2" }, // Added flex container for name and status
+                            React.createElement('span', { className: "px-2" }, player.name),
+                            React.createElement(PlayerStatus, { player: player })
+                          )
                   )
                 ))
               ),
