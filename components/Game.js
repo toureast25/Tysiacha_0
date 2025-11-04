@@ -451,33 +451,42 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   }
 
   const handleNewGame = () => {
-      if (myPlayerId !== gameState.hostId) return; // Only host can start a new game
+      if (myPlayerId !== gameState.hostId) return;
 
-      const newInitialState = createInitialState(playerCount);
+      // 1. Get a completely fresh state. This is the foundation.
+      const newState = createInitialState(playerCount);
       const oldPlayers = gameState.players;
-      
-      const newPlayers = newInitialState.players.map((p, i) => {
-          const oldPlayer = oldPlayers[i];
+
+      // 2. Go through the old players. If a player is still active,
+      //    update the corresponding slot in the NEW state.
+      oldPlayers.forEach(oldPlayer => {
           if (oldPlayer && oldPlayer.isClaimed && !oldPlayer.isSpectator) {
-              // Preserve host's online status to prevent them from losing host role immediately
-              const status = (i === gameState.hostId) ? 'online' : 'offline';
-              return { ...p, name: oldPlayer.name, isClaimed: true, status: status };
+              const playerIndex = oldPlayer.id;
+              // Update the player slot in our new, clean state
+              newState.players[playerIndex] = {
+                  ...newState.players[playerIndex], // Start with the clean player object
+                  name: oldPlayer.name,
+                  isClaimed: true,
+                  // The host is the one clicking, so they are online.
+                  // Others will send heartbeats to update their status.
+                  status: oldPlayer.id === gameState.hostId ? 'online' : 'offline',
+              };
           }
-          return p;
       });
 
-      const newHostId = gameState.hostId;
-      // The host should start the new game.
-      const firstPlayerIndex = newHostId;
+      // 3. Set the host and starting player.
+      newState.hostId = gameState.hostId;
+      newState.currentPlayerIndex = gameState.hostId; // Host starts
+
+      // 4. Set the game message.
+      const startingPlayerName = newState.players[newState.currentPlayerIndex].name;
+      newState.gameMessage = `Новая игра! Ход ${startingPlayerName}.`;
       
-      publishState({ 
-          ...newInitialState, 
-          players: newPlayers, 
-          hostId: newHostId,
-          currentPlayerIndex: firstPlayerIndex, // Host starts
-          gameMessage: `Новая игра! Ход ${newPlayers[newHostId].name}.`,
-          turnStartTime: Date.now() 
-      });
+      // 5. Set the start time.
+      newState.turnStartTime = Date.now();
+
+      // 6. Publish the completely rebuilt state.
+      publishState(newState);
   };
 
 
