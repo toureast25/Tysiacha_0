@@ -52,13 +52,25 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     }
   }, [myPlayerId, roomCode, playerCount, playerName, isSpectator]);
 
-  const publishState = useCallback((newState) => {
+  const publishState = useCallback((newState, isOptimisticUpdate = false) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
       const currentVersion = gameStateRef.current?.version || 0;
-      const stateWithVersion = { ...newState, version: currentVersion + 1 };
-      mqttClientRef.current.publish(topic, JSON.stringify(stateWithVersion), { retain: true });
+      // Ensure we don't pass the senderId from a received state back into a new state
+      const { senderId, ...stateWithoutSender } = newState; 
+      
+      const finalState = {
+        ...stateWithoutSender,
+        version: currentVersion + 1,
+        senderId: myPlayerId,
+      };
+
+      if (isOptimisticUpdate && myPlayerId !== null) {
+        setGameState(finalState);
+      }
+      
+      mqttClientRef.current.publish(topic, JSON.stringify(finalState), { retain: true });
     }
-  }, [topic]);
+  }, [topic, myPlayerId]);
 
   const findNextActivePlayer = useCallback((startIndex, players) => {
       let nextIndex = (startIndex + 1) % players.length;
@@ -117,19 +129,30 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             try {
                 const receivedState = JSON.parse(message.toString());
                 setGameState(state => {
+                    // New logic for optimistic updates
+                    if (state && receivedState.version === state.version) {
+                        // If it's from another player with the same version, it's a race condition.
+                        // We accept their state to stay in sync. "Last write wins".
+                        if (receivedState.senderId !== myPlayerId) {
+                            return receivedState;
+                        }
+                        // If it's my own message that I already updated for, ignore.
+                        return state;
+                    }
+
                     if (!state || receivedState.version > state.version) {
-                        // Check if I have been made a spectator by timeout (this logic is now deprecated by slot reset)
+                        // Standard update for newer versions
                         if(myPlayerId !== null && receivedState.players[myPlayerId]?.isSpectator){
                             setIsSpectator(true);
                             localStorage.removeItem('tysiacha-session');
                         }
-                        // Check if my slot has been reset
-                         if(myPlayerId !== null && !receivedState.players[myPlayerId]?.isClaimed){
-                            onExit(); // Go to lobby if kicked
+                        if(myPlayerId !== null && !receivedState.players[myPlayerId]?.isClaimed){
+                            onExit();
                         }
                         return receivedState;
                     }
-                    return state;
+                    
+                    return state; // Old version, ignore.
                 });
             } catch (e) { console.error('Error parsing game state:', e); }
         }
@@ -177,11 +200,14 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
 
             // Status update check
             let newStatus = playerCopy.status;
-            if (now - lastSeen > 60000) { // 60 seconds
+
+            if (lastSeen === 0 && (playerCopy.status === 'online' || playerCopy.status === 'away')) {
+                // Ничего не делаем, ждем первый heartbeat.
+            } else if (now - lastSeen > 60000) {
                 newStatus = 'disconnected';
-            } else if (now - lastSeen > 10000) { // 10 seconds
+            } else if (now - lastSeen > 10000) {
                 newStatus = 'away';
-            } else {
+            } else if (lastSeen > 0) {
                 newStatus = 'online';
             }
 
@@ -192,24 +218,22 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             return playerCopy;
         });
 
-        // We only publish if a state change was detected.
-        // The versioning on the receiver side will handle race conditions.
         if (needsUpdate) {
             const remainingPlayersAfterUpdate = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
+            const newState = { ...localGameState, players: newPlayers };
             
             if (remainingPlayersAfterUpdate.length === 1 && activePlayersCountBeforeUpdate > 1 && !localGameState.isGameOver) {
                  publishState({
-                    ...localGameState,
-                    players: newPlayers,
+                    ...newState,
                     isGameOver: true,
                     gameMessage: `${remainingPlayersAfterUpdate[0].name} победил, так как все остальные игроки вышли!`,
                 });
-                return; // End early if game is over
+                return;
             }
             
-            publishState({ ...localGameState, players: newPlayers });
+            publishState(newState);
         }
-    }, 5000); // Check every 5 seconds
+    }, 5000);
 
     client.on('error', () => setConnectionStatus('error'));
     client.on('offline', () => setConnectionStatus('reconnecting'));
@@ -220,7 +244,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       clearInterval(statusCheckInterval);
       if (client) client.end();
     };
-  }, [roomCode, playerCount, playerName, publishState]); // Dependencies are correct
+  }, [roomCode, playerCount, playerName, onExit]);
 
 
   // --- Game Logic Actions ---
@@ -228,10 +252,9 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     const state = gameState;
     if (!state.canRoll || state.isGameOver) return;
     
-    // First move can only be made by the host (player 0)
     const isFirstMoveEver = state.players.every(p => p.scores.length === 0);
     if (isFirstMoveEver && myPlayerId !== 0) {
-      return; // Should be blocked by UI, but this is a safeguard
+      return;
     }
 
     const claimedPlayerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
@@ -262,7 +285,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
         gameMessage: `${state.players[state.currentPlayerIndex].name} получает болт! Ход ${nextPlayer.name}.`,
         turnStartTime: Date.now(),
       };
-      publishState(boltState);
+      publishState(boltState, true);
       return;
     }
     
@@ -279,7 +302,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       canKeep: false,
       potentialScore: 0,
     };
-    publishState(newState);
+    publishState(newState, true);
   };
   
   const handleToggleDieSelection = (index) => {
@@ -313,7 +336,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             ? `Выбрано +${validation.score}. Перетащите или дважды кликните, чтобы отложить.`
             : `Выберите корректную комбинацию.`,
     };
-    publishState(newState);
+    publishState(newState, true);
   };
 
   const handleKeepDice = (indices) => {
@@ -325,7 +348,8 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     const validation = validateSelection(combinedDiceForValidation);
 
     if (!validation.isValid) {
-        publishState({ ...state, gameMessage: "Неверный выбор. Эта кость не образует очковую комбинацию." });
+        const newState = { ...state, gameMessage: "Неверный выбор. Эта кость не образует очковую комбинацию." };
+        publishState(newState, true);
         return;
     }
 
@@ -365,7 +389,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             potentialScore: 0,
         };
     }
-    publishState(newState);
+    publishState(newState, true);
   };
   
   const handleBankScore = () => {
@@ -385,7 +409,8 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       const newPlayersWithBolt = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, '/'] } : p);
       const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayersWithBolt);
       const nextPlayerName = newPlayersWithBolt[nextIdx].name;
-      publishState({ ...createInitialState(playerCount), players: newPlayersWithBolt, spectators: state.spectators, currentPlayerIndex: nextIdx, gameMessage: `${currentPlayer.name} получает болт. Ход ${nextPlayerName}.`, turnStartTime: Date.now() });
+      const boltState = { ...createInitialState(playerCount), players: newPlayersWithBolt, spectators: state.spectators, currentPlayerIndex: nextIdx, gameMessage: `${currentPlayer.name} получает болт. Ход ${nextPlayerName}.`, turnStartTime: Date.now() };
+      publishState(boltState, true);
       return;
     }
 
@@ -393,13 +418,15 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     const totalScore = calculateTotalScore(newPlayers[state.currentPlayerIndex]);
     
     if (totalScore >= 1000) {
-      publishState({ ...createInitialState(playerCount), players: newPlayers, spectators: state.spectators, isGameOver: true, gameMessage: `${currentPlayer.name} победил, набрав ${totalScore} очков!` });
+      const winState = { ...createInitialState(playerCount), players: newPlayers, spectators: state.spectators, isGameOver: true, gameMessage: `${currentPlayer.name} победил, набрав ${totalScore} очков!` };
+      publishState(winState, true);
       return;
     }
 
     const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
     const nextPlayerName = newPlayers[nextPlayerIndex].name;
-    publishState({ ...createInitialState(playerCount), players: newPlayers, spectators: state.spectators, currentPlayerIndex: nextPlayerIndex, gameMessage: `${currentPlayer.name} записал ${finalTurnScore} очков. Ход ${nextPlayerName}.`, turnStartTime: Date.now() });
+    const bankState = { ...createInitialState(playerCount), players: newPlayers, spectators: state.spectators, currentPlayerIndex: nextPlayerIndex, gameMessage: `${currentPlayer.name} записал ${finalTurnScore} очков. Ход ${nextPlayerName}.`, turnStartTime: Date.now() };
+    publishState(bankState, true);
   };
 
   const handleSkipTurn = () => {
