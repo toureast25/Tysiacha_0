@@ -6,29 +6,27 @@ import RulesModal from './RulesModal.js';
 import SpectatorsModal from './SpectatorsModal.js';
 import { DiceIcon, SmallDiceIcon } from './Dice.js';
 
-const { useState, useEffect, useCallback, useRef } = React;
-
 const Game = ({ roomCode, playerCount, playerName, onExit }) => {
-  const [gameState, setGameState] = useState(null);
-  const [myPlayerId, setMyPlayerId] = useState(null);
-  const [isSpectator, setIsSpectator] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('connecting');
-  const [isScoreboardExpanded, setIsScoreboardExpanded] = useState(false);
-  const [isSpectatorsModalOpen, setIsSpectatorsModalOpen] = useState(false);
-  const [showRules, setShowRules] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
+  const [gameState, setGameState] = React.useState(null);
+  const [myPlayerId, setMyPlayerId] = React.useState(null);
+  const [isSpectator, setIsSpectator] = React.useState(false);
+  const [connectionStatus, setConnectionStatus] = React.useState('connecting');
+  const [isScoreboardExpanded, setIsScoreboardExpanded] = React.useState(false);
+  const [isSpectatorsModalOpen, setIsSpectatorsModalOpen] = React.useState(false);
+  const [showRules, setShowRules] = React.useState(false);
+  const [isDragOver, setIsDragOver] = React.useState(false);
   
-  const mqttClientRef = useRef(null);
-  const isStateReceivedRef = useRef(false);
-  const lastSeenTimestampsRef = useRef({});
-  const gameStateRef = useRef(); // Ref to hold the latest game state for intervals/callbacks
+  const mqttClientRef = React.useRef(null);
+  const isStateReceivedRef = React.useRef(false);
+  const lastSeenTimestampsRef = React.useRef({});
+  const gameStateRef = React.useRef(); // Ref to hold the latest game state for intervals/callbacks
 
   // Keep the ref updated with the latest state
-  useEffect(() => {
+  React.useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (playerName) {
       document.title = `Тысяча (${playerName}) - онлайн игра в кости`;
     }
@@ -41,7 +39,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   const presenceTopic = `${topic}/presence`;
   
   // This effect ensures the session is saved when a player ID is assigned
-  useEffect(() => {
+  React.useEffect(() => {
     if (myPlayerId !== null) {
         const sessionData = { roomCode, playerCount, playerName, myPlayerId };
         localStorage.setItem('tysiacha-session', JSON.stringify(sessionData));
@@ -52,7 +50,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     }
   }, [myPlayerId, roomCode, playerCount, playerName, isSpectator]);
 
-  const publishState = useCallback((newState, isOptimisticUpdate = false) => {
+  const publishState = React.useCallback((newState, isOptimisticUpdate = false) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
       const currentVersion = gameStateRef.current?.version || 0;
       // Ensure we don't pass the senderId from a received state back into a new state
@@ -72,7 +70,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     }
   }, [topic, myPlayerId]);
 
-  const findNextActivePlayer = useCallback((startIndex, players) => {
+  const findNextActivePlayer = React.useCallback((startIndex, players) => {
       let nextIndex = (startIndex + 1) % players.length;
       while (nextIndex !== startIndex) {
           if (players[nextIndex].isClaimed && !players[nextIndex].isSpectator) {
@@ -83,7 +81,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       return startIndex; // Only one player left
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const client = mqtt.connect(MQTT_BROKER_URL);
     mqttClientRef.current = client;
     isStateReceivedRef.current = false;
@@ -484,7 +482,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
         return;
       }
       
-      const state = gameState;
+      const state = gameStateRef.current; // Use ref to get latest state
       const me = state.players[myPlayerId];
       const initialPlayerState = createInitialState(playerCount).players[myPlayerId];
       const newPlayers = state.players.map(p => 
@@ -507,7 +505,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       // If only one player remains, they win.
       if (remainingPlayers.length === 1 && activePlayersBeforeLeave > 1) {
           finalState = {
-              ...state,
+              ...state, // Safe to spread here because we are ending the game
               players: newPlayers,
               spectators: state.spectators,
               isGameOver: true,
@@ -517,14 +515,17 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
           // If the last player leaves, reset the game state entirely
           finalState = createInitialState(playerCount);
           finalState.gameMessage = 'Все игроки вышли. Игра окончена.';
-      }
-      else {
+      } else {
+          // Normal leave: create a clean state for the next player's turn
+          const cleanState = createInitialState(playerCount);
+          const nextPlayerName = newPlayers[nextPlayerIndex].name;
           finalState = {
-              ...state,
+              ...cleanState,
               players: newPlayers,
               spectators: state.spectators,
               currentPlayerIndex: nextPlayerIndex,
-              gameMessage: `${me.name} покинул(а) игру.`,
+              gameMessage: `${me.name} покинул(а) игру. Ход ${nextPlayerName}.`,
+              turnStartTime: Date.now(),
           };
       }
       
@@ -708,7 +709,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             ),
             React.createElement('div', { className: "max-w-2xl mx-auto" },
               gameState.isGameOver
-                ? React.createElement('button', { onClick: handleNewGame, disabled: !isHost, className: "w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Новая Игра')
+                ? React.createElement('button', { onClick: handleNewGame, disabled: !isHost, className: "w-full py-4 bg-blue-600 hover:bg-blue-600 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Новая Игра')
                 : React.createElement('div', { className: "grid grid-cols-2 gap-4" },
                     React.createElement('button', { onClick: handleRollDice, disabled: !isMyTurn || !gameState.canRoll || (isFirstMoveEver && myPlayerId !== 0), className: "w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, rollButtonText),
                     React.createElement('button', { onClick: handleBankScore, disabled: !isMyTurn || !gameState.canBank, className: "w-full py-3 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Записать')

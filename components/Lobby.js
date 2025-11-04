@@ -2,17 +2,15 @@
 import React from 'react';
 import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
 
-const { useState, useEffect } = React;
-
 const Lobby = ({ onStartGame }) => {
-  const [roomCode, setRoomCode] = useState('');
-  const [playerCount, setPlayerCount] = useState(2);
-  const [playerName, setPlayerName] = useState('');
+  const [roomCode, setRoomCode] = React.useState('');
+  const [playerCount, setPlayerCount] = React.useState(2);
+  const [playerName, setPlayerName] = React.useState('');
   // Initialize state based on localStorage to avoid race conditions on mount
-  const [isJoining, setIsJoining] = useState(() => !!localStorage.getItem('tysiacha-lastRoom'));
-  const [roomStatus, setRoomStatus] = useState(null); // { status: 'loading' | 'active' | 'waiting' | 'not_found', host: 'name', message: '...' }
+  const [isJoining, setIsJoining] = React.useState(() => !!localStorage.getItem('tysiacha-lastRoom'));
+  const [roomStatus, setRoomStatus] = React.useState(null); // { status: 'loading' | 'active' | 'waiting' | 'not_found', host: 'name', message: '...' }
 
-  useEffect(() => {
+  React.useEffect(() => {
     // Pre-fill player name from a previous session if it exists
     const savedName = localStorage.getItem('tysiacha-playerName');
     if (savedName) {
@@ -25,7 +23,7 @@ const Lobby = ({ onStartGame }) => {
     }
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (!isJoining) {
       generateRoomCode();
       setRoomStatus(null);
@@ -33,7 +31,7 @@ const Lobby = ({ onStartGame }) => {
   }, [isJoining]);
 
   // Fetch room status when roomCode changes in joining mode
-  useEffect(() => {
+  React.useEffect(() => {
     const code = roomCode.trim();
     if (isJoining && code.length >= 4) {
       setRoomStatus({ status: 'loading' });
