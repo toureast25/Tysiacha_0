@@ -613,10 +613,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
         };
         publishState(newState, true);
     } else {
-        const firstAvailableIndex = state.players.findIndex(p => !p.isClaimed && !p.isSpectator);
-        if (firstAvailableIndex === -1) return;
+        const lastAvailableIndex = state.players.reduce((last, p, i) => (!p.isClaimed && !p.isSpectator ? i : last), -1);
+        if (lastAvailableIndex === -1) return;
 
-        setMyPlayerId(firstAvailableIndex);
+        setMyPlayerId(lastAvailableIndex);
 
         const restoredScore = state.leavers?.[playerName] || 0;
         const initialScores = restoredScore > 0 ? [restoredScore] : [];
@@ -624,7 +624,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
         if (restoredScore > 0) delete newLeavers[playerName];
 
         const newPlayers = state.players.map((p, i) => {
-            if (i === firstAvailableIndex) {
+            if (i === lastAvailableIndex) {
                 return { ...p, name: playerName, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: mySessionIdRef.current };
             }
             return p;
@@ -632,7 +632,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
         let newHostId = state.hostId;
         if (state.hostId === null || !newPlayers.some(p => p.id === state.hostId && p.isClaimed)) {
-            newHostId = findNextHost(newPlayers) ?? firstAvailableIndex;
+            newHostId = findNextHost(newPlayers) ?? lastAvailableIndex;
         }
 
         const claimedPlayerCount = newPlayers.filter(p => p.isClaimed && !p.isSpectator).length;
@@ -670,73 +670,61 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
       
     const state = gameStateRef.current;
-    if(!state) return;
+    if(!state) return onExit();
 
-    const me = state.players[myPlayerId];
+    const me = state.players.find(p => p.id === myPlayerId);
+    if (!me) return onExit();
+
+    // 1. Save score to leavers object
     const totalScore = calculateTotalScore(me);
-    let newLeavers = state.leavers || {};
+    const newLeavers = (totalScore > 0) 
+      ? { ...state.leavers, [me.name]: totalScore }
+      : { ...state.leavers };
 
-    if (totalScore > 0) {
-      newLeavers = { ...newLeavers, [me.name]: totalScore };
-    }
-    
-    const playerCount = state.players.length;
+    // 2. Create new player list: active players who are staying, re-indexed from 0
+    let newPlayers = state.players
+      .filter(p => p.isClaimed && p.id !== myPlayerId)
+      .map((p, index) => ({ ...p, id: index }));
 
-    // Create a new player list by removing the current player and re-indexing
-    const remainingPlayers = state.players.filter(p => p.id !== myPlayerId);
-    const reindexedPlayers = remainingPlayers.map((p, index) => ({
-        ...p,
-        id: index,
-    }));
-
-    const newPlayers = [...reindexedPlayers];
-    if (newPlayers.length < playerCount) {
+    // 3. Pad with empty slots until the list has 5 players
+    while (newPlayers.length < 5) {
         const newId = newPlayers.length;
-        const cleanPlayerSlot = createInitialState().players[0];
-        newPlayers.push({
-            ...cleanPlayerSlot,
-            id: newId,
-            name: `Игрок ${newId + 1}`,
+        newPlayers.push({ 
+            id: newId, 
+            name: `Игрок ${newId + 1}`, 
+            scores: [], 
+            isClaimed: false, 
+            status: 'offline', 
+            isSpectator: false 
         });
     }
 
-    // Find the new host ID
-    const oldHost = state.hostId !== null ? state.players[state.hostId] : null;
-    let newHostId = null;
-    if (oldHost && oldHost.id !== myPlayerId) {
-        const newHost = newPlayers.find(p => p.sessionId === oldHost.sessionId);
-        newHostId = newHost ? newHost.id : null;
-    }
-    if (newHostId === null) {
-        newHostId = findNextHost(newPlayers);
-    }
+    // 4. Find new host
+    const newHostId = findNextHost(newPlayers);
     
-    // Determine the next current player
-    const wasMyTurn = myPlayerId === state.currentPlayerIndex;
-    const gameWasInProgress = !state.isGameOver;
+    // 5. Determine next current player
     let newCurrentPlayerIndex = 0;
-
+    const gameWasInProgress = !state.isGameOver && state.isGameStarted;
+    const oldCurrentPlayer = state.players[state.currentPlayerIndex];
+    
     if (gameWasInProgress) {
-      if (wasMyTurn) {
-          const nextIndex = myPlayerId % newPlayers.length;
-          newCurrentPlayerIndex = findNextActivePlayer(nextIndex - 1, newPlayers);
-      } else {
-          const oldCurrentPlayer = state.players[state.currentPlayerIndex];
-          const newCurrentPlayer = newPlayers.find(p => p.sessionId === oldCurrentPlayer.sessionId);
-          if (newCurrentPlayer) {
-              newCurrentPlayerIndex = newCurrentPlayer.id;
-          } else {
-              newCurrentPlayerIndex = findNextActivePlayer(state.currentPlayerIndex - 1, newPlayers);
-          }
-      }
+        if (oldCurrentPlayer.id === myPlayerId) { // It was my turn
+            // The turn passes to the next available player, starting search from the beginning
+            newCurrentPlayerIndex = findNextActivePlayer(-1, newPlayers); 
+        } else {
+            // Find the same current player in the new list
+            const currentPlayerInNewList = newPlayers.find(p => p.sessionId === oldCurrentPlayer.sessionId);
+            newCurrentPlayerIndex = currentPlayerInNewList ? currentPlayerInNewList.id : findNextActivePlayer(-1, newPlayers);
+        }
     } else {
-        newCurrentPlayerIndex = state.currentPlayerIndex < newPlayers.length ? state.currentPlayerIndex : 0;
+        newCurrentPlayerIndex = state.hostId !== null && newPlayers.some(p => p.id === state.hostId) ? state.hostId : 0;
     }
 
     const remainingActivePlayers = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
     const activePlayersBeforeLeave = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
     
     let finalState;
+    // 6. Check for auto-win condition
     if (gameWasInProgress && remainingActivePlayers.length < 2 && activePlayersBeforeLeave >= 2) {
         finalState = {
             ...state,
@@ -753,7 +741,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
         const nextPlayerName = nextPlayer ? nextPlayer.name : '';
         
         let message = `${me.name} покинул(а) игру.`;
-        if(gameWasInProgress && nextPlayerName && wasMyTurn) {
+        if (gameWasInProgress && nextPlayerName && oldCurrentPlayer.id === myPlayerId) {
             message += ` Ход ${nextPlayerName}.`;
         }
 
@@ -766,7 +754,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
           gameMessage: message,
         };
         
-        if (wasMyTurn && gameWasInProgress) {
+        // If it was the leaver's turn, reset turn state for the next player
+        if (oldCurrentPlayer.id === myPlayerId && gameWasInProgress) {
             const cleanTurnState = createInitialState();
             finalState = {
                 ...finalState,
