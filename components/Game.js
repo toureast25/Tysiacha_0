@@ -286,12 +286,18 @@ const Game = ({ roomCode, playerName, onExit }) => {
         publishState({ ...state, gameMessage: "Нужно как минимум 2 игрока, чтобы начать." });
         return;
     }
+    
+    const firstPlayer = state.players[state.currentPlayerIndex];
+    let gameMessage = `Игра началась! Ход ${firstPlayer.name}.`;
+    if (!firstPlayer.hasEnteredGame) {
+        gameMessage += ` Ему нужно 50+ для входа.`;
+    }
 
     publishState({
         ...state,
         isGameStarted: true,
         canRoll: true,
-        gameMessage: `Игра началась! Ход ${state.players[state.currentPlayerIndex].name}.`,
+        gameMessage: gameMessage,
         turnStartTime: Date.now(),
     });
   };
@@ -313,6 +319,11 @@ const Game = ({ roomCode, playerName, onExit }) => {
       const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
       const nextPlayer = newPlayers[nextPlayerIndex];
 
+      let gameMessage = `${state.players[state.currentPlayerIndex].name} получает болт! Ход ${nextPlayer.name}.`;
+      if (!nextPlayer.hasEnteredGame) {
+        gameMessage += ` Ему нужно 50+ для входа.`;
+      }
+
       const boltState = {
         ...createInitialState(),
         players: newPlayers,
@@ -322,7 +333,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
         isGameStarted: true, // Keep game started
         currentPlayerIndex: nextPlayerIndex,
         diceOnBoard: newDice,
-        gameMessage: `${state.players[state.currentPlayerIndex].name} получает болт! Ход ${nextPlayer.name}.`,
+        gameMessage: gameMessage,
         turnStartTime: Date.now(),
         canRoll: true,
       };
@@ -449,13 +460,44 @@ const Game = ({ roomCode, playerName, onExit }) => {
     if (finalTurnScore === 0) {
       const newPlayersWithBolt = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, '/'] } : p);
       const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayersWithBolt);
-      const nextPlayerName = newPlayersWithBolt[nextIdx].name;
-      const boltState = { ...createInitialState(), players: newPlayersWithBolt, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: `${currentPlayer.name} получает болт. Ход ${nextPlayerName}.`, turnStartTime: Date.now() };
+      const nextPlayer = newPlayersWithBolt[nextIdx];
+      let msg = `${currentPlayer.name} получает болт. Ход ${nextPlayer.name}.`;
+      if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
+      const boltState = { ...createInitialState(), players: newPlayersWithBolt, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() };
       publishState(boltState, true);
       return;
     }
 
-    const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, finalTurnScore] } : p);
+    // "Бочка" - проверка входа в игру
+    if (!currentPlayer.hasEnteredGame && finalTurnScore < 50) {
+        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, state.players);
+        const nextPlayer = state.players[nextPlayerIndex];
+        let msg = `${currentPlayer.name} не набрал(а) 50 очков для входа. Ход ${nextPlayer.name}.`;
+        if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
+
+        const failEntryState = { 
+            ...createInitialState(), 
+            players: state.players, 
+            spectators: state.spectators, 
+            leavers: state.leavers, 
+            hostId: state.hostId, 
+            isGameStarted: true, 
+            canRoll: true, 
+            currentPlayerIndex: nextPlayerIndex, 
+            gameMessage: msg, 
+            turnStartTime: Date.now() 
+        };
+        publishState(failEntryState, true);
+        return;
+    }
+
+    const newPlayers = state.players.map((p, i) => {
+        if (i === state.currentPlayerIndex) {
+            return { ...p, scores: [...p.scores, finalTurnScore], hasEnteredGame: true };
+        }
+        return p;
+    });
+
     const totalScore = calculateTotalScore(newPlayers[state.currentPlayerIndex]);
     
     if (totalScore >= 1000) {
@@ -465,8 +507,17 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
 
     const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
-    const nextPlayerName = newPlayers[nextPlayerIndex].name;
-    const bankState = { ...createInitialState(), players: newPlayers, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextPlayerIndex, gameMessage: `${currentPlayer.name} записал ${finalTurnScore} очков. Ход ${nextPlayerName}.`, turnStartTime: Date.now() };
+    const nextPlayer = newPlayers[nextPlayerIndex];
+
+    let bankMessage = !currentPlayer.hasEnteredGame
+        ? `${currentPlayer.name} вошёл в игру, записав ${finalTurnScore}! Ход ${nextPlayer.name}.`
+        : `${currentPlayer.name} записал ${finalTurnScore} очков. Ход ${nextPlayer.name}.`;
+    
+    if (!nextPlayer.hasEnteredGame) {
+        bankMessage += ` Ему нужно 50+ для входа.`;
+    }
+
+    const bankState = { ...createInitialState(), players: newPlayers, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextPlayerIndex, gameMessage: bankMessage, turnStartTime: Date.now() };
     publishState(bankState, true);
   };
 
@@ -479,8 +530,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
     const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, '/'] } : p);
     const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
-    const nextPlayerName = newPlayers[nextIdx].name;
-    publishState({ ...createInitialState(), players: newPlayers, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: `${currentPlayer.name} пропустил ход. Ход ${nextPlayerName}.`, turnStartTime: Date.now() });
+    const nextPlayer = newPlayers[nextIdx];
+    let msg = `${currentPlayer.name} пропустил ход. Ход ${nextPlayer.name}.`;
+    if(!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
+    publishState({ ...createInitialState(), players: newPlayers, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
   }
 
   const handleNewGame = () => {
@@ -498,6 +551,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
                   status: oldPlayer.status,
                   isSpectator: false,
                   sessionId: oldPlayer.sessionId,
+                  hasEnteredGame: false, // Сброс для новой игры
               };
           }
           
@@ -552,7 +606,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
             const newPlayers = newState.players.map((p, i) =>
                 i === firstAvailableIndex
-                ? { ...p, name: request.name, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: request.sessionId }
+                ? { ...p, name: request.name, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: request.sessionId, hasEnteredGame: restoredScore > 0 } // Восстанавливаем статус входа
                 : p
             );
             newState = { ...newState, players: newPlayers, leavers: newLeavers, gameMessage: `${request.name} присоединился к игре.` };
@@ -625,7 +679,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
         const newPlayers = state.players.map((p, i) => {
             if (i === lastAvailableIndex) {
-                return { ...p, name: playerName, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: mySessionIdRef.current };
+                return { ...p, name: playerName, isClaimed: true, scores: initialScores, status: 'online', isSpectator: false, sessionId: mySessionIdRef.current, hasEnteredGame: restoredScore > 0 };
             }
             return p;
         });
@@ -695,7 +749,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
             scores: [], 
             isClaimed: false, 
             status: 'offline', 
-            isSpectator: false 
+            isSpectator: false,
+            hasEnteredGame: false,
         });
     }
 
@@ -855,7 +910,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
           const hostName = hostPlayer ? hostPlayer.name : 'хост';
           displayMessage = `${gameState.gameMessage} Ожидание, пока ${hostName} начнет новую игру.`;
       }
+  } else if (isMyTurn && !currentPlayer.hasEnteredGame && gameState.isGameStarted) {
+      displayMessage = "Ваш ход. Вам нужно набрать 50+ очков, чтобы войти в игру.";
   }
+
 
   const JoinRequestManager = () => {
     if (!isHost || !gameState.joinRequests || gameState.joinRequests.length === 0) {
@@ -944,6 +1002,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
                             )
                           : React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2" },
                               React.createElement('span', { className: "px-2" }, player.name),
+                              !player.hasEnteredGame && gameState.isGameStarted && React.createElement('span', { className: "text-xs font-normal text-cyan-300 italic", title: "Нужно набрать 50+ очков для входа" }, '(на бочке)'),
                               React.createElement(PlayerStatus, { player: player })
                             )
                     );
@@ -957,6 +1016,9 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
                   if (!hasAnyPlayerJoined) {
                      return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Ожидание игроков...'));
+                  }
+                  if (maxRounds === 0 && gameState.isGameStarted) {
+                     return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Никто еще не вошел в игру.'));
                   }
                   if (maxRounds === 0) {
                      return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Еще не было записано очков.'));
