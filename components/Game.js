@@ -549,8 +549,30 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
 
     if (turnFailedBarrel) {
-        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, state.players);
-        const nextPlayer = state.players[nextPlayerIndex];
+        const currentPlayerForBarrelBolt = { ...currentPlayer };
+        let updatedPlayer = {
+          ...currentPlayerForBarrelBolt,
+          scores: [...currentPlayerForBarrelBolt.scores, '/'],
+        };
+        
+        const newBarrelBolts = (updatedPlayer.barrelBolts || 0) + 1;
+        updatedPlayer.barrelBolts = newBarrelBolts;
+        if (newBarrelBolts >= 3) {
+            const totalScore = calculateTotalScore(currentPlayerForBarrelBolt);
+            let penalty = 0;
+            if (barrelStatus === '200-300') {
+                penalty = 150 - totalScore;
+            } else if (barrelStatus === '700-800') {
+                penalty = 650 - totalScore;
+            }
+            updatedPlayer.scores.push(penalty);
+            updatedPlayer.barrelBolts = 0; // Reset
+        }
+
+        const newPlayersWithBarrelBolt = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
+
+        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayersWithBarrelBolt);
+        const nextPlayer = newPlayersWithBarrelBolt[nextPlayerIndex];
         let msg = `${currentPlayer.name} не смог(ла) сойти с бочки. Очки сгорели. Ход ${nextPlayer.name}.`;
         
         const nextPlayerStatus = getPlayerBarrelStatus(nextPlayer);
@@ -562,7 +584,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
         const failBarrelState = { 
             ...createInitialState(), 
-            players: state.players, // Scores remain unchanged
+            players: newPlayersWithBarrelBolt, 
             spectators: state.spectators, 
             leavers: state.leavers, 
             hostId: state.hostId, 
@@ -586,19 +608,50 @@ const Game = ({ roomCode, playerName, onExit }) => {
         return p;
     });
 
-    // 2. Применяем штрафы за обгон
     const currentPlayerNewTotal = calculateTotalScore(playersAfterTurn[state.currentPlayerIndex]);
     let penaltyMessages = [];
+
+    // 2. Рассчитываем и применяем все штрафы
+    const newBarrelStatus = 
+        (currentPlayerNewTotal >= 200 && currentPlayerNewTotal < 300) ? '200-300' :
+        (currentPlayerNewTotal >= 700 && currentPlayerNewTotal < 800) ? '700-800' : null;
+
     let playersWithPenalties = playersAfterTurn.map((p, i) => {
         if (i === state.currentPlayerIndex || !p.isClaimed) {
             return p;
         }
+
+        const originalPlayerState = state.players[i];
+        const otherPlayerOldTotal = calculateTotalScore(originalPlayerState);
+        const penaltiesToAdd = [];
+
+        // Штраф за столкновение на бочке
+        if (newBarrelStatus) {
+            const otherPlayerBarrelStatus = getPlayerBarrelStatus(originalPlayerState);
+            if (otherPlayerBarrelStatus === newBarrelStatus) {
+                penaltyMessages.push(`${p.name} сбит с бочки.`);
+                let penaltyAmount = 0;
+                if (newBarrelStatus === '200-300') {
+                    penaltyAmount = 150 - otherPlayerOldTotal;
+                } else { // 700-800
+                    penaltyAmount = 650 - otherPlayerOldTotal;
+                }
+                penaltiesToAdd.push(penaltyAmount);
+            }
+        }
         
-        const otherPlayerOldTotal = calculateTotalScore(state.players[i]);
+        // Штраф за обгон
         if (currentPlayerNewTotal >= otherPlayerOldTotal && otherPlayerOldTotal >= 100) {
             penaltyMessages.push(`${p.name} получает штраф -50.`);
-            return { ...p, scores: [...p.scores, -50] };
+            penaltiesToAdd.push(-50);
         }
+        
+        if (penaltiesToAdd.length > 0) {
+            // Убедимся, что штрафы не дублируются, если игрок уже был оштрафован на бочке
+            const uniquePenalties = [...new Set(penaltiesToAdd)];
+            return { ...p, scores: [...p.scores, ...uniquePenalties] };
+        }
+        
         return p;
     });
 
@@ -623,7 +676,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
         : `${currentPlayer.name} записал ${finalTurnScore} очков. Ход ${nextPlayer.name}.`;
     
     if (penaltyMessages.length > 0) {
-        bankMessage += " " + penaltyMessages.join(" ");
+        bankMessage += " " + [...new Set(penaltyMessages)].join(" ");
     }
     
     const nextPlayerBarrelStatus = getPlayerBarrelStatus(nextPlayer);
@@ -1085,13 +1138,13 @@ const Game = ({ roomCode, playerName, onExit }) => {
     isSpectatorsModalOpen && React.createElement(SpectatorsModal, { spectators: gameState.spectators, onClose: () => setIsSpectatorsModalOpen(false) }),
     React.createElement(
       'div', { className: "w-full h-full flex flex-col p-4 text-white overflow-hidden" },
-      React.createElement('header', { className: "flex justify-between items-center mb-4 flex-shrink-0" },
+      React.createElement('header', { className: `flex justify-between items-center mb-4 flex-shrink-0 transition-opacity duration-300 ${isScoreboardExpanded ? 'opacity-0 pointer-events-none lg:opacity-100 lg:pointer-events-auto' : 'opacity-100'}` },
         React.createElement('div', { className: "p-2 bg-black/50 rounded-lg text-sm" }, React.createElement('p', { className: "font-mono" }, `КОД КОМНАТЫ: ${roomCode}`)),
         React.createElement('h1', { onClick: () => setShowRules(true), className: "font-ruslan text-4xl text-yellow-300 cursor-pointer hover:text-yellow-200 transition-colors", title: "Показать правила" }, 'ТЫСЯЧА'),
         React.createElement('button', { onClick: handleLeaveGame, className: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-bold" }, isSpectator || canJoin ? 'Вернуться в лобби' : 'Выйти из игры')
       ),
       React.createElement('div', { className: "flex-grow flex flex-col lg:grid lg:grid-cols-4 gap-4 min-h-0" },
-        React.createElement('aside', { className: `lg:col-span-1 bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-col transition-all duration-500 ease-in-out ${isScoreboardExpanded ? 'h-full' : 'flex-shrink-0'}` },
+        React.createElement('aside', { className: `bg-slate-800/80 p-4 border border-slate-700 flex flex-col transition-all duration-500 ease-in-out lg:col-span-1 ${isScoreboardExpanded ? 'fixed inset-x-4 top-24 bottom-4 z-40 rounded-xl lg:relative lg:inset-auto lg:z-auto' : 'flex-shrink-0 rounded-xl'}` },
           React.createElement('div', { className: "flex justify-between items-center mb-4 flex-shrink-0" },
             React.createElement('h2', { className: "font-ruslan text-3xl text-yellow-300 flex items-baseline" },
               'Игроки',
@@ -1107,7 +1160,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
                 ')'
               )
             ),
-            React.createElement('button', { onClick: () => setIsScoreboardExpanded(!isScoreboardExpanded), className: "p-1 rounded-full hover:bg-slate-700/50 lg:hidden ml-auto" }, 
+            React.createElement('button', { onClick: () => setIsScoreboardExpanded(!isScoreboardExpanded), className: "p-1 rounded-full hover:bg-slate-700/50 lg:hidden ml-auto z-50" }, 
               React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: `h-6 w-6 text-yellow-300 transition-transform duration-300 ${isScoreboardExpanded ? 'rotate-180' : ''}`, fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 2 },
                 React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M19 9l-7 7-7-7" })
               )
@@ -1121,6 +1174,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
                     const index = player.id;
                     const isUnclaimedAndEmpty = !player.isClaimed && player.name === `Игрок ${player.id + 1}`;
                     const barrelStatus = getPlayerBarrelStatus(player);
+                    const isHostPlayer = player.id === gameState.hostId;
             
                     return React.createElement('th', { 
                         key: `player-header-${player.id}`, 
@@ -1138,7 +1192,12 @@ const Game = ({ roomCode, playerName, onExit }) => {
                               React.createElement('span', { className: "text-xs italic" }, '(вышел)')
                             )
                           : React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2" },
-                              React.createElement('span', { className: "px-2" }, player.name),
+                              React.createElement('div', { className: "flex items-center justify-center" },
+                                isHostPlayer && React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: "h-4 w-4 mr-1 text-yellow-400", viewBox: "0 0 24 24", fill: "currentColor" },
+                                  React.createElement('path', { d: "M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z" })
+                                ),
+                                React.createElement('span', { className: "px-1" }, player.name)
+                              ),
                               !player.hasEnteredGame && gameState.isGameStarted && React.createElement('span', { className: "text-xs font-normal text-cyan-300 italic", title: "Нужно набрать 50+ очков для входа" }, '(на старте)'),
                               barrelStatus && React.createElement('span', { className: "text-xs font-normal text-orange-400 italic", title: `Нужно набрать очков, чтобы стало ${barrelStatus === '200-300' ? '300+' : '800+'}` }, '(на бочке)'),
                               barrelStatus && player.barrelBolts > 0 && React.createElement('span', { className: 'text-xs font-bold text-red-500 ml-1' }, '/'.repeat(player.barrelBolts)),
@@ -1188,7 +1247,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
             )
           )
         ),
-        React.createElement('main', { className: `relative flex-grow lg:col-span-3 bg-slate-900/70 rounded-xl border-2 flex flex-col justify-between transition-all duration-300 min-h-0 ${isDragOver && isMyTurn ? 'border-green-400 shadow-2xl shadow-green-400/20' : 'border-slate-600'} p-4`, onDragOver: (e) => {e.preventDefault(); setIsDragOver(true);}, onDrop: handleDrop, onDragLeave: () => setIsDragOver(false) },
+        React.createElement('main', { className: `relative flex-grow lg:col-span-3 bg-slate-900/70 rounded-xl border-2 flex flex-col justify-between min-h-0 p-4 transition-all duration-300 ${isDragOver && isMyTurn ? 'border-green-400 shadow-2xl shadow-green-400/20' : 'border-slate-600'} ${isScoreboardExpanded ? 'opacity-0 pointer-events-none lg:opacity-100 lg:pointer-events-auto' : 'opacity-100'}`, onDragOver: (e) => {e.preventDefault(); setIsDragOver(true);}, onDrop: handleDrop, onDragLeave: () => setIsDragOver(false) },
           React.createElement(JoinRequestManager, null),
           React.createElement('div', { className: "w-full" },
             React.createElement('div', { className: `w-full p-3 mb-4 text-center rounded-lg ${gameState.isGameOver ? 'bg-green-600' : 'bg-slate-800'} border border-slate-600 flex items-center justify-center min-h-[72px]` },
