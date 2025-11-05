@@ -66,9 +66,8 @@ const App = () => {
     try {
         const savedSession = localStorage.getItem('tysiacha-session');
         if (savedSession) {
-            const { roomCode, playerCount, playerName } = JSON.parse(savedSession);
-            // We don't pass myPlayerId here, Game component will restore it itself
-            handleStartGame(roomCode, playerCount, playerName);
+            const { roomCode, playerName } = JSON.parse(savedSession);
+            handleStartGame(roomCode, playerName);
         }
     } catch(e) {
         console.error("Failed to load session:", e);
@@ -76,8 +75,8 @@ const App = () => {
     }
   }, [tabStatus]); // Этот эффект зависит от того, стала ли вкладка главной
 
-  const handleStartGame = React.useCallback((roomCode, playerCount, playerName) => {
-    setGameProps({ roomCode, playerCount, playerName });
+  const handleStartGame = React.useCallback((roomCode, playerName) => {
+    setGameProps({ roomCode, playerName });
     setScreen('GAME');
   }, []);
 

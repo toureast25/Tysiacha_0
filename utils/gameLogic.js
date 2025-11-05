@@ -106,9 +106,9 @@ export const calculateTotalScore = (player) => {
         .reduce((sum, s) => sum + s, 0);
 };
 
-export const createInitialState = (pCount) => {
+export const createInitialState = () => {
   return {
-    players: Array.from({ length: pCount }, (_, i) => ({ 
+    players: Array.from({ length: 5 }, (_, i) => ({ 
         id: i, 
         name: `Игрок ${i + 1}`, 
         scores: [], 
@@ -117,6 +117,8 @@ export const createInitialState = (pCount) => {
         isSpectator: false,
     })),
     spectators: [],
+    leavers: {}, // Track scores of players who left
+    joinRequests: [], // Track join requests for host approval
     currentPlayerIndex: 0,
     hostId: 0, // Player 0 is the initial host
     diceOnBoard: [],

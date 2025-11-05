@@ -4,7 +4,6 @@ import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
 
 const Lobby = ({ onStartGame }) => {
   const [roomCode, setRoomCode] = React.useState('');
-  const [playerCount, setPlayerCount] = React.useState(2);
   const [playerName, setPlayerName] = React.useState('');
   // Initialize state based on localStorage to avoid race conditions on mount
   const [isJoining, setIsJoining] = React.useState(() => !!localStorage.getItem('tysiacha-lastRoom'));
@@ -113,7 +112,7 @@ const Lobby = ({ onStartGame }) => {
     const finalPlayerName = playerName.trim();
     if (finalRoomCode.length >= 4 && finalPlayerName.length > 2) {
       localStorage.setItem('tysiacha-playerName', finalPlayerName);
-      onStartGame(finalRoomCode, playerCount, finalPlayerName);
+      onStartGame(finalRoomCode, finalPlayerName);
     }
   };
   
@@ -184,30 +183,10 @@ const Lobby = ({ onStartGame }) => {
         }),
         isJoining ? React.createElement(RoomStatusInfo) : React.createElement('p', { className: "text-sm text-gray-400 mt-2" }, 'Поделитесь этим кодом с друзьями')
       ),
-      React.createElement(
+      !isJoining && React.createElement(
         'div',
-        null,
-        React.createElement(
-          'label',
-          { htmlFor: "playerCount", className: "block text-lg font-semibold text-gray-300 mb-2" },
-          'Количество игроков'
-        ),
-        React.createElement(
-          'div',
-          { className: "flex items-center justify-center space-x-4" },
-          [2, 3, 4, 5].map(num =>
-            React.createElement(
-              'button',
-              {
-                key: num,
-                onClick: () => setPlayerCount(num),
-                disabled: isJoining,
-                className: `w-12 h-12 text-xl font-bold rounded-full transition-all ${playerCount === num && !isJoining ? 'bg-yellow-400 text-slate-900 scale-110' : 'bg-slate-700 text-white hover:bg-slate-600'} ${isJoining ? 'opacity-50 cursor-not-allowed' : ''}`
-              },
-              num
-            )
-          )
-        )
+        { className: "p-3 bg-slate-900/50 border border-slate-600 rounded-lg" },
+         React.createElement('p', { className: "text-gray-300" }, 'Игра всегда создается на 5 мест.')
       ),
       React.createElement(
         'button',
