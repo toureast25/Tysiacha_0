@@ -1,7 +1,7 @@
 // 
 import React from 'react';
 import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
-import { analyzeDice, validateSelection, calculateTotalScore, createInitialState, findNextHost } from '../utils/gameLogic.js';
+import { analyzeDice, validateSelection, calculateTotalScore, createInitialState, findNextHost, getPlayerBarrelStatus } from '../utils/gameLogic.js';
 import RulesModal from './RulesModal.js';
 import SpectatorsModal from './SpectatorsModal.js';
 import { DiceIcon, SmallDiceIcon } from './Dice.js';
@@ -490,6 +490,46 @@ const Game = ({ roomCode, playerName, onExit }) => {
         publishState(failEntryState, true);
         return;
     }
+    
+    // "Бочки" - Barrel logic
+    const totalScoreBeforeTurn = calculateTotalScore(currentPlayer);
+    const barrelStatus = getPlayerBarrelStatus(currentPlayer);
+    let turnFailedBarrel = false;
+
+    if (barrelStatus === '200-300' && (totalScoreBeforeTurn + finalTurnScore < 300)) {
+        turnFailedBarrel = true;
+    } else if (barrelStatus === '700-800' && (totalScoreBeforeTurn + finalTurnScore < 800)) {
+        turnFailedBarrel = true;
+    }
+
+    if (turnFailedBarrel) {
+        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, state.players);
+        const nextPlayer = state.players[nextPlayerIndex];
+        let msg = `${currentPlayer.name} не смог(ла) сойти с бочки. Очки сгорели. Ход ${nextPlayer.name}.`;
+        
+        const nextPlayerStatus = getPlayerBarrelStatus(nextPlayer);
+        if (!nextPlayer.hasEnteredGame) {
+            msg += ` Ему нужно 50+ для входа.`;
+        } else if (nextPlayerStatus) {
+            msg += ` Он(а) на бочке ${nextPlayerStatus}.`;
+        }
+
+        const failBarrelState = { 
+            ...createInitialState(), 
+            players: state.players, // Scores remain unchanged
+            spectators: state.spectators, 
+            leavers: state.leavers, 
+            hostId: state.hostId, 
+            isGameStarted: true, 
+            canRoll: true, 
+            currentPlayerIndex: nextPlayerIndex, 
+            gameMessage: msg, 
+            turnStartTime: Date.now() 
+        };
+        publishState(failBarrelState, true);
+        return;
+    }
+
 
     const newPlayers = state.players.map((p, i) => {
         if (i === state.currentPlayerIndex) {
@@ -513,9 +553,13 @@ const Game = ({ roomCode, playerName, onExit }) => {
         ? `${currentPlayer.name} вошёл в игру, записав ${finalTurnScore}! Ход ${nextPlayer.name}.`
         : `${currentPlayer.name} записал ${finalTurnScore} очков. Ход ${nextPlayer.name}.`;
     
+    const nextPlayerBarrelStatus = getPlayerBarrelStatus(nextPlayer);
     if (!nextPlayer.hasEnteredGame) {
         bankMessage += ` Ему нужно 50+ для входа.`;
+    } else if (nextPlayerBarrelStatus) {
+        bankMessage += ` Он(а) на бочке ${nextPlayerBarrelStatus}.`;
     }
+
 
     const bankState = { ...createInitialState(), players: newPlayers, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextPlayerIndex, gameMessage: bankMessage, turnStartTime: Date.now() };
     publishState(bankState, true);
@@ -912,6 +956,8 @@ const Game = ({ roomCode, playerName, onExit }) => {
   const isAwaitingApproval = myPlayerId === null && gameState.joinRequests && gameState.joinRequests.some(r => r.sessionId === mySessionIdRef.current);
 
   let displayMessage = gameState.gameMessage;
+  const myBarrelStatus = isMyTurn ? getPlayerBarrelStatus(currentPlayer) : null;
+
   if (gameState.isGameOver && !canJoin) {
       if (isHost && claimedPlayerCount < 2) {
           displayMessage = 'Недостаточно игроков для начала новой игры (нужно минимум 2).';
@@ -920,8 +966,14 @@ const Game = ({ roomCode, playerName, onExit }) => {
           const hostName = hostPlayer ? hostPlayer.name : 'хост';
           displayMessage = `${gameState.gameMessage} Ожидание, пока ${hostName} начнет новую игру.`;
       }
-  } else if (isMyTurn && !currentPlayer.hasEnteredGame && gameState.isGameStarted) {
-      displayMessage = "Ваш ход. Вам нужно набрать 50+ очков, чтобы войти в игру.";
+  } else if (isMyTurn && gameState.isGameStarted) {
+      if (!currentPlayer.hasEnteredGame) {
+          displayMessage = "Ваш ход. Вам нужно набрать 50+ очков, чтобы войти в игру.";
+      } else if (myBarrelStatus === '200-300') {
+          displayMessage = "Ваш ход. Вы на бочке! Нужно набрать очков, чтобы стало 300 или больше за этот ход.";
+      } else if (myBarrelStatus === '700-800') {
+          displayMessage = "Ваш ход. Вы на бочке! Нужно набрать очков, чтобы стало 800 или больше за этот ход.";
+      }
   }
 
 
@@ -994,6 +1046,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
                   gameState.players.map(player => {
                     const index = player.id;
                     const isUnclaimedAndEmpty = !player.isClaimed && player.name === `Игрок ${player.id + 1}`;
+                    const barrelStatus = getPlayerBarrelStatus(player);
             
                     return React.createElement('th', { 
                         key: `player-header-${player.id}`, 
@@ -1013,6 +1066,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
                           : React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2" },
                               React.createElement('span', { className: "px-2" }, player.name),
                               !player.hasEnteredGame && gameState.isGameStarted && React.createElement('span', { className: "text-xs font-normal text-cyan-300 italic", title: "Нужно набрать 50+ очков для входа" }, '(на старте)'),
+                              barrelStatus && React.createElement('span', { className: "text-xs font-normal text-orange-400 italic", title: `Нужно набрать очков, чтобы стало ${barrelStatus === '200-300' ? '300+' : '800+'}` }, '(на бочке)'),
                               React.createElement(PlayerStatus, { player: player })
                             )
                     );

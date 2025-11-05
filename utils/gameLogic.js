@@ -106,6 +106,20 @@ export const calculateTotalScore = (player) => {
         .reduce((sum, s) => sum + s, 0);
 };
 
+export const getPlayerBarrelStatus = (player) => {
+    if (!player || !player.isClaimed || !player.hasEnteredGame) {
+        return null;
+    }
+    const totalScore = calculateTotalScore(player);
+    if (totalScore >= 200 && totalScore < 300) {
+        return '200-300';
+    }
+    if (totalScore >= 700 && totalScore < 800) {
+        return '700-800';
+    }
+    return null;
+};
+
 export const createInitialState = () => {
   return {
     players: Array.from({ length: 5 }, (_, i) => ({ 
@@ -115,7 +129,7 @@ export const createInitialState = () => {
         isClaimed: false,
         status: 'offline', // 'online', 'away', 'disconnected'
         isSpectator: false,
-        hasEnteredGame: false, // Для правила "входа в игру"
+        hasEnteredGame: false, // Для правила "входа в игру" (старт)
     })),
     spectators: [],
     leavers: {}, // Track scores of players who left
