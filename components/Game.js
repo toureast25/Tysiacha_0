@@ -105,7 +105,8 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
 
       setTimeout(() => {
         if (!isStateReceivedRef.current) {
-            const initialState = createInitialState(playerCount);
+            const initialPlayerCount = gameStateRef.current ? gameStateRef.current.players.length : playerCount;
+            const initialState = createInitialState(initialPlayerCount);
             initialState.players[0] = {
                 ...initialState.players[0],
                 name: playerName,
@@ -126,6 +127,15 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             isStateReceivedRef.current = true;
             try {
                 const receivedState = JSON.parse(message.toString());
+                
+                const currentGameState = gameStateRef.current;
+                
+                // If a joining client has a different player count, adjust the state.
+                if (!currentGameState && receivedState.players.length !== playerCount) {
+                    const clientInitialState = createInitialState(receivedState.players.length);
+                    setGameState(clientInitialState);
+                }
+
                 setGameState(state => {
                     // New logic for optimistic updates
                     if (state && receivedState.version === state.version) {
@@ -262,12 +272,6 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     const isFirstMoveEver = state.players.every(p => p.scores.length === 0);
     if (isFirstMoveEver && myPlayerId !== state.hostId) {
       return;
-    }
-
-    const claimedPlayerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
-    if (claimedPlayerCount < 2 && state.players.every(p => p.scores.length === 0)) {
-        publishState({ ...state, gameMessage: "Нужно как минимум 2 игрока, чтобы начать игру." });
-        return;
     }
 
     const isHotDiceRoll = state.keptDiceThisTurn.length >= 5;
@@ -478,7 +482,19 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
       });
 
       const hostPlayer = newPlayers.find(p => p.id === oldState.hostId);
-      const startingPlayerName = hostPlayer ? hostPlayer.name : 'Игрок';
+      const claimedPlayerCount = newPlayers.filter(p => p.isClaimed && !p.isSpectator).length;
+      
+      let gameMessage;
+      let canRoll;
+
+      if (claimedPlayerCount < 2) {
+          gameMessage = `${hostPlayer.name} создал(а) новую игру. Ожидание других игроков...`;
+          canRoll = false;
+      } else {
+          const startingPlayerName = hostPlayer ? hostPlayer.name : 'Игрок';
+          gameMessage = `Новая игра! Ход ${startingPlayerName}.`;
+          canRoll = true;
+      }
 
       const finalState = {
           ...createInitialState(oldState.players.length), 
@@ -486,7 +502,8 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
           spectators: oldState.spectators, 
           hostId: oldState.hostId,
           currentPlayerIndex: oldState.hostId,
-          gameMessage: `Новая игра! Ход ${startingPlayerName}.`,
+          gameMessage,
+          canRoll,
           turnStartTime: Date.now(),
       };
       
@@ -527,11 +544,21 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
     }
 
     const claimedPlayerCount = newPlayers.filter(p => p.isClaimed && !p.isSpectator).length;
-    const gameMessage = claimedPlayerCount > 1
-        ? `Ход ${newPlayers[state.currentPlayerIndex].name}. Бросайте кости!`
-        : `Ожидание игроков...`;
+    const isFreshGame = state.players.every(p => p.scores.length === 0);
 
-    publishState({ ...state, players: newPlayers, gameMessage, hostId: newHostId }, true);
+    let gameMessage = state.gameMessage;
+    let canRoll = state.canRoll;
+
+    if (claimedPlayerCount >= 2 && isFreshGame && !state.canRoll) {
+        gameMessage = `Игра началась! Ход ${newPlayers[state.currentPlayerIndex].name}.`;
+        canRoll = true;
+    } else if (claimedPlayerCount < 2) {
+        gameMessage = `Ожидание игроков...`;
+    } else {
+        gameMessage = `${playerName} присоединился. Ход ${newPlayers[state.currentPlayerIndex].name}.`;
+    }
+
+    publishState({ ...state, players: newPlayers, gameMessage, hostId: newHostId, canRoll }, true);
   };
 
   const handleLeaveGame = () => {
@@ -649,6 +676,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
 
   const isMyTurn = myPlayerId === gameState.currentPlayerIndex && !isSpectator;
   const isHost = myPlayerId === gameState.hostId;
+  const claimedPlayerCount = gameState.players.filter(p => p.isClaimed && !p.isSpectator).length;
   const rollButtonText = (gameState.keptDiceThisTurn.length >= 5 ? 5 : 5 - gameState.keptDiceThisTurn.length) === 5 
     ? 'Бросить все' : `Бросить ${5 - gameState.keptDiceThisTurn.length}`;
   
@@ -659,8 +687,14 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
   const isFirstMoveEver = gameState.players.every(p => p.scores.length === 0);
 
   let displayMessage = gameState.gameMessage;
-  if (gameState.isGameOver && !isHost) {
-      displayMessage = `${gameState.gameMessage} Ожидание, пока хост начнет новую игру.`;
+  if (gameState.isGameOver) {
+      if (isHost && claimedPlayerCount < 2) {
+          displayMessage = 'Недостаточно игроков для начала новой игры (нужно минимум 2).';
+      } else if (!isHost) {
+          const hostPlayer = gameState.players.find(p => p.id === gameState.hostId);
+          const hostName = hostPlayer ? hostPlayer.name : 'хост';
+          displayMessage = `${gameState.gameMessage} Ожидание, пока ${hostName} начнет новую игру.`;
+      }
   }
 
   return React.createElement(
@@ -804,7 +838,7 @@ const Game = ({ roomCode, playerCount, playerName, onExit }) => {
             ),
             React.createElement('div', { className: "max-w-2xl mx-auto" },
               gameState.isGameOver
-                ? React.createElement('button', { onClick: handleNewGame, disabled: !isHost, className: "w-full py-4 bg-blue-600 hover:bg-blue-600 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Новая Игра')
+                ? React.createElement('button', { onClick: handleNewGame, disabled: !isHost || claimedPlayerCount < 2, className: "w-full py-4 bg-blue-600 hover:bg-blue-600 rounded-lg text-2xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Новая Игра')
                 : React.createElement('div', { className: "grid grid-cols-2 gap-4" },
                     React.createElement('button', { onClick: handleRollDice, disabled: !isMyTurn || !gameState.canRoll || (isFirstMoveEver && myPlayerId !== gameState.hostId), className: "w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, rollButtonText),
                     React.createElement('button', { onClick: handleBankScore, disabled: !isMyTurn || !gameState.canBank, className: "w-full py-3 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Записать')
