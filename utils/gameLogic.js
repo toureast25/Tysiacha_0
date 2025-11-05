@@ -115,7 +115,7 @@ export const createInitialState = () => {
         isClaimed: false,
         status: 'offline', // 'online', 'away', 'disconnected'
         isSpectator: false,
-        hasEnteredGame: false, // Для правила "бочки"
+        hasEnteredGame: false, // Для правила "входа в игру"
     })),
     spectators: [],
     leavers: {}, // Track scores of players who left

@@ -468,7 +468,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
       return;
     }
 
-    // "Бочка" - проверка входа в игру
+    // "Старт" - проверка входа в игру
     if (!currentPlayer.hasEnteredGame && finalTurnScore < 50) {
         const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, state.players);
         const nextPlayer = state.players[nextPlayerIndex];
@@ -1012,7 +1012,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
                             )
                           : React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2" },
                               React.createElement('span', { className: "px-2" }, player.name),
-                              !player.hasEnteredGame && gameState.isGameStarted && React.createElement('span', { className: "text-xs font-normal text-cyan-300 italic", title: "Нужно набрать 50+ очков для входа" }, '(на бочке)'),
+                              !player.hasEnteredGame && gameState.isGameStarted && React.createElement('span', { className: "text-xs font-normal text-cyan-300 italic", title: "Нужно набрать 50+ очков для входа" }, '(на старте)'),
                               React.createElement(PlayerStatus, { player: player })
                             )
                     );
