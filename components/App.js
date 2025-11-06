@@ -17,6 +17,7 @@ const App = () => {
   const [screen, setScreen] = React.useState('LOBBY');
   const [gameProps, setGameProps] = React.useState({});
   const [tabStatus, setTabStatus] = React.useState('CHECKING'); // CHECKING, PRIMARY, BLOCKED
+  const [initialRoomCode, setInitialRoomCode] = React.useState(null);
   const channelRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -60,8 +61,26 @@ const App = () => {
   }, [tabStatus]); // Перезапускаем логику, если статус изменился (например, главная вкладка стала отвечать)
 
 
+  const handleStartGame = React.useCallback((roomCode, playerName) => {
+    setGameProps({ roomCode, playerName });
+    setScreen('GAME');
+  }, []);
+  
   React.useEffect(() => {
     if (tabStatus !== 'PRIMARY') return;
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomCodeFromUrl = urlParams.get('room');
+
+    if (roomCodeFromUrl) {
+      localStorage.removeItem('tysiacha-session');
+      setGameProps({});
+      setScreen('LOBBY');
+      setInitialRoomCode(roomCodeFromUrl.toUpperCase());
+      // Clean up the URL to not show the room code after it's been read
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
     
     try {
         const savedSession = localStorage.getItem('tysiacha-session');
@@ -73,12 +92,7 @@ const App = () => {
         console.error("Failed to load session:", e);
         localStorage.removeItem('tysiacha-session');
     }
-  }, [tabStatus]); // Этот эффект зависит от того, стала ли вкладка главной
-
-  const handleStartGame = React.useCallback((roomCode, playerName) => {
-    setGameProps({ roomCode, playerName });
-    setScreen('GAME');
-  }, []);
+  }, [tabStatus, handleStartGame]);
 
   const handleExitGame = React.useCallback(() => {
     localStorage.removeItem('tysiacha-session');
@@ -98,7 +112,7 @@ const App = () => {
             return React.createElement(Game, { key: gameProps.roomCode, ...gameProps, onExit: handleExitGame });
           case 'LOBBY':
           default:
-            return React.createElement(Lobby, { onStartGame: handleStartGame });
+            return React.createElement(Lobby, { onStartGame: handleStartGame, initialRoomCode: initialRoomCode });
         }
       default:
         return null;
