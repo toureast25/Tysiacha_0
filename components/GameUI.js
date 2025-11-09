@@ -163,14 +163,27 @@ const GameUI = (props) => {
                       const hasAnyPlayerJoined = gameState.players.some(p => p.isClaimed || p.isSpectator || p.name !== `Игрок ${p.id + 1}`);
                       const maxRounds = gameState.players.reduce((max, p) => Math.max(max, (p.scores ? p.scores.length : 0)), 0);
     
+                      const createPlaceholderRow = (text) => {
+                        return React.createElement('tr', { className: `border-slate-700 ${isScoreboardExpanded ? 'border-b' : 'border-b-0 lg:border-b'}` },
+                            React.createElement('td', {
+                                colSpan: gameState.players.length,
+                                className: `text-center text-gray-400 italic transition-all duration-500 ease-in-out ${isScoreboardExpanded ? 'p-2' : 'p-0 lg:p-2'}`
+                            },
+                                React.createElement('div', {
+                                    className: `overflow-hidden transition-all duration-500 ease-in-out ${isScoreboardExpanded ? 'max-h-8' : 'max-h-0 lg:max-h-8'}`
+                                }, text)
+                            )
+                        );
+                      };
+
                       if (!hasAnyPlayerJoined) {
-                         return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Ожидание игроков...'));
+                         return createPlaceholderRow('Ожидание игроков...');
                       }
                       if (maxRounds === 0 && gameState.isGameStarted) {
-                         return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Никто еще не вошел в игру.'));
+                         return createPlaceholderRow('Никто еще не вошел в игру.');
                       }
                       if (maxRounds === 0) {
-                         return React.createElement('tr', null, React.createElement('td', { colSpan: gameState.players.length, className: "py-4 px-2 text-center text-gray-400 italic" }, 'Еще не было записано очков.'));
+                         return createPlaceholderRow('Еще не было записано очков.');
                       }
                       
                       const rows = [];
