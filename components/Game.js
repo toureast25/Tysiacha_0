@@ -703,6 +703,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
         const originalPlayerState = state.players[i];
         const otherPlayerOldTotal = calculateTotalScore(originalPlayerState);
         const penaltiesToAdd = [];
+        let wasKnockedOffBarrel = false;
 
         // Штраф за столкновение на бочке
         if (newBarrelStatus) {
@@ -716,11 +717,12 @@ const Game = ({ roomCode, playerName, onExit }) => {
                     penaltyAmount = 650 - otherPlayerOldTotal;
                 }
                 penaltiesToAdd.push(penaltyAmount);
+                wasKnockedOffBarrel = true;
             }
         }
         
         // Штраф за обгон
-        if (totalScoreBeforeTurn < otherPlayerOldTotal && currentPlayerNewTotal >= otherPlayerOldTotal && otherPlayerOldTotal >= 100) {
+        if (!wasKnockedOffBarrel && totalScoreBeforeTurn < otherPlayerOldTotal && currentPlayerNewTotal >= otherPlayerOldTotal && otherPlayerOldTotal >= 100) {
             const scoreAfterPenalty = otherPlayerOldTotal - 50;
             const wouldLandOnBarrel = 
                 (scoreAfterPenalty >= 200 && scoreAfterPenalty < 300) ||
@@ -736,7 +738,6 @@ const Game = ({ roomCode, playerName, onExit }) => {
         }
         
         if (penaltiesToAdd.length > 0) {
-            // Убедимся, что штрафы не дублируются, если игрок уже был оштрафован на бочке
             const uniquePenalties = [...new Set(penaltiesToAdd)];
             return { ...p, scores: [...p.scores, ...uniquePenalties] };
         }
@@ -1251,7 +1252,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     onJoinRequest: handleJoinRequest,
     onToggleDieSelection: handleToggleDieSelection,
     onDragStart: handleDragStart,
-    onDrop: handleDrop,
+    onDrop: onDrop,
     onDieDoubleClick: handleDieDoubleClick,
     onInitiateKick: handleInitiateKick,
     onConfirmKick: handleConfirmKick,
