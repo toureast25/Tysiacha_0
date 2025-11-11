@@ -2,7 +2,7 @@
 // Service Worker для кэширования ресурсов PWA
 
 // ВАЖНО: Увеличиваем версию кэша, чтобы Service Worker обновился у всех пользователей.
-const CACHE_NAME = 'tysiacha-cache-v2';
+const CACHE_NAME = 'tysiacha-cache-v3';
 
 // Сокращаем список до абсолютно необходимого "каркаса" приложения.
 // Остальные ресурсы (компоненты, утилиты) будут закэшированы динамически при первом запросе.
@@ -11,11 +11,19 @@ const urlsToCache = [
   '/',
   '/index.html',
   '/style.css',
+  '/manifest.json',
   '/index.js',
   '/constants.js',
   '/utils/gameLogic.js',
   '/components/App.js',
-  '/manifest.json'
+  '/components/Lobby.js',
+  '/components/Game.js',
+  '/components/GameUI.js',
+  '/components/Dice.js',
+  '/components/RulesModal.js',
+  '/components/SpectatorsModal.js',
+  '/components/KickConfirmModal.js',
+  '/components/PlayerContextMenu.js'
 ];
 
 // Установка Service Worker и кэширование статических ассетов
