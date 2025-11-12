@@ -168,6 +168,7 @@ export const findNextHost = (players) => {
     const awayPlayer = candidates.find(p => p.status === 'away');
     if (awayPlayer) return awayPlayer.id;
     
-    // Если нет никого онлайн или отошедших, хоста быть не может.
-    return null;
+    // Приоритет №3: В крайнем случае, выбираем первого кандидата в списке, независимо от статуса.
+    // Это гарантирует, что хост будет всегда, если в игре есть хотя бы один заявленный игрок.
+    return candidates[0].id;
 };

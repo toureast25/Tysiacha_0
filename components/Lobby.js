@@ -1,4 +1,3 @@
-
 // 
 import React from 'react';
 import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
@@ -142,7 +141,7 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
   
   const RoomStatusInfo = () => {
     if (!roomCode || roomCode.trim().length < 4) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Код должен быть не менее 4 символов');
-    if (!isClientConnected) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px] flex items-center justify-center" }, React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-yellow-300 rounded-full animate-spin mr-2"}), 'Подключение к сети...');
+    if (!isClientConnected) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px] flex items-center justify-center" }, React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-title-yellow rounded-full animate-spin mr-2"}), 'Подключение к сети...');
     if (!roomStatus) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Придумайте код или введите существующий');
     
     let content;
@@ -150,7 +149,7 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
     
     switch(roomStatus.status) {
         case 'loading':
-            icon = React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-yellow-300 rounded-full animate-spin mr-2"});
+            icon = React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-title-yellow rounded-full animate-spin mr-2"});
             content = 'Проверка комнаты...';
             break;
         case 'not_found':
@@ -180,7 +179,7 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
   return React.createElement(
     'div',
     { className: "w-full max-w-md p-6 sm:p-8 bg-slate-800/80 backdrop-blur-md rounded-xl shadow-2xl border border-slate-700 text-center" },
-    React.createElement('h2', { className: "font-ruslan text-2xl sm:text-4xl lg:text-5xl text-yellow-300 mb-4 sm:mb-6" }, 'Вход в игру'),
+    React.createElement('h2', { className: "font-ruslan text-2xl sm:text-4xl lg:text-5xl text-title-yellow mb-4 sm:mb-6" }, 'Вход в игру'),
     React.createElement(
       'div',
       { className: "space-y-4 sm:space-y-6" },
@@ -198,7 +197,7 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
           value: playerName,
           onChange: (e) => setPlayerName(e.target.value),
           placeholder: "Введите имя",
-          className: "w-full p-3 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-xl font-semibold text-white focus:outline-none focus:border-yellow-400 transition-colors"
+          className: "w-full p-3 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-xl font-semibold text-white focus:outline-none focus:border-highlight transition-colors"
         })
       ),
       React.createElement(
@@ -218,13 +217,13 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
               value: roomCode,
               onChange: (e) => setRoomCode(e.target.value.toUpperCase()),
               placeholder: "Введите код",
-              className: "w-full p-3 pr-12 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-yellow-400 transition-colors"
+              className: "w-full p-3 pr-12 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-highlight transition-colors"
             }),
             React.createElement(
                 'button',
                 {
                     onClick: generateRoomCode,
-                    className: "absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-yellow-300 transition-colors focus:outline-none",
+                    className: "absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-title-yellow transition-colors focus:outline-none",
                     'aria-label': "Сгенерировать новый код",
                     title: "Сгенерировать новый код"
                 },

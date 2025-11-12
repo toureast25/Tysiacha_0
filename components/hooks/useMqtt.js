@@ -42,8 +42,8 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
     const connectOptions = {
       clientId: `tysiacha-pwa-${mySessionId}`, // СТАБИЛЬНЫЙ ID на всю сессию вкладки
       clean: true,
-      connectTimeout: 5000, // 5 секунд
-      reconnectPeriod: 4000, // Увеличена задержка для стабильности
+      connectTimeout: 8000, // Увеличено до 8 секунд для медленных сетей
+      reconnectPeriod: 5000, // Увеличена задержка для стабильности
       keepalive: 30, // Пинги для поддержания соединения
     };
     const client = mqtt.connect(MQTT_BROKER_URL, connectOptions);

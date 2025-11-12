@@ -23,8 +23,8 @@ const JoinRequestManager = ({ isHost, gameState, onJoinRequest }) => {
     if (!isHost || !gameState.joinRequests || gameState.joinRequests.length === 0) {
         return null;
     }
-    return React.createElement('div', { className: 'absolute top-24 left-1/2 -translate-x-1/2 w-full max-w-md p-4 bg-slate-700 border-2 border-yellow-400 rounded-lg shadow-lg z-20 animate-pulse' },
-        React.createElement('h3', { className: 'text-lg font-bold text-yellow-300 mb-2 text-center' }, 'Запросы на присоединение'),
+    return React.createElement('div', { className: 'absolute top-24 left-1/2 -translate-x-1/2 w-full max-w-md p-4 bg-slate-700 border-2 border-highlight rounded-lg shadow-lg z-20 animate-pulse' },
+        React.createElement('h3', { className: 'text-lg font-bold text-title-yellow mb-2 text-center' }, 'Запросы на присоединение'),
         React.createElement('ul', { className: 'space-y-2' },
             gameState.joinRequests.map(req => React.createElement('li', { key: req.sessionId, className: 'flex items-center justify-between p-2 bg-slate-800 rounded' },
                 React.createElement('span', { className: 'text-white' }, req.name),
@@ -39,9 +39,9 @@ const JoinRequestManager = ({ isHost, gameState, onJoinRequest }) => {
 
 const AwaitingApprovalScreen = () => {
     return React.createElement('div', { className: 'text-center' },
-        React.createElement('h3', { className: 'font-ruslan text-3xl text-yellow-300' }, 'Ожидание подтверждения'),
+        React.createElement('h3', { className: 'font-ruslan text-3xl text-title-yellow' }, 'Ожидание подтверждения'),
         React.createElement('p', { className: 'mt-4 text-lg' }, 'Ваш запрос на присоединение к игре отправлен хосту.'),
-        React.createElement('div', { className: 'mt-6 w-16 h-16 border-4 border-t-transparent border-yellow-300 rounded-full animate-spin mx-auto' })
+        React.createElement('div', { className: 'mt-6 w-16 h-16 border-4 border-t-transparent border-title-yellow rounded-full animate-spin mx-auto' })
     );
 };
 
@@ -147,7 +147,7 @@ const GameUI = (props) => {
           React.createElement('header', { className: "flex justify-between items-center mb-2 sm:mb-4 flex-shrink-0" },
             React.createElement('div', { className: "flex items-center gap-2 p-2 pr-1 bg-black/50 rounded-lg text-sm" },
               React.createElement('p', { className: "font-mono" }, `КОД КОМНАТЫ:`),
-              React.createElement('strong', { className: "font-mono text-base text-yellow-300" }, roomCode),
+              React.createElement('strong', { className: "font-mono text-base text-title-yellow" }, roomCode),
               React.createElement('button', {
                 onClick: handleCopyLink,
                 className: `p-1.5 rounded-md transition-all duration-200 ${isLinkCopied ? 'bg-green-600' : 'bg-slate-700 hover:bg-slate-600'}`,
@@ -161,13 +161,13 @@ const GameUI = (props) => {
                       React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" }))
               )
             ),
-            React.createElement('h1', { onClick: () => onSetShowRules(true), className: "font-ruslan text-4xl text-yellow-300 cursor-pointer hover:text-yellow-200 transition-colors", title: "Показать правила" }, 'ТЫСЯЧА'),
+            React.createElement('h1', { onClick: () => onSetShowRules(true), className: "font-ruslan text-4xl text-title-yellow cursor-pointer hover:text-yellow-200 transition-colors", title: "Показать правила" }, 'ТЫСЯЧА'),
             React.createElement('button', { onClick: onLeaveGame, className: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-bold" }, isSpectator || canJoin ? 'Вернуться в лобби' : 'Выйти из игры')
           ),
           React.createElement('div', { className: "flex-grow flex flex-col lg:grid lg:grid-cols-4 gap-2 sm:gap-4 min-h-0" },
             React.createElement('aside', { className: `bg-slate-800/80 p-2 sm:p-4 border border-slate-700 flex flex-col overflow-hidden transition-all duration-500 ease-in-out lg:col-span-1 rounded-xl ${isScoreboardExpanded ? 'flex-grow' : 'flex-shrink-0'}` },
               React.createElement('div', { className: "flex justify-between items-center mb-2 sm:mb-4 flex-shrink-0" },
-                React.createElement('h2', { className: "font-ruslan text-3xl text-yellow-300 flex items-baseline" },
+                React.createElement('h2', { className: "font-ruslan text-3xl text-title-yellow flex items-baseline" },
                   'Игроки',
                   gameState.spectators.length > 0 && React.createElement('span', { className: "text-xl ml-2 font-normal font-['Roboto_Condensed']" },
                     '(',
@@ -182,14 +182,14 @@ const GameUI = (props) => {
                   )
                 ),
                 React.createElement('button', { onClick: () => onSetIsScoreboardExpanded(!isScoreboardExpanded), className: "p-1 rounded-full hover:bg-slate-700/50 lg:hidden ml-auto z-50" }, 
-                  React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: `h-6 w-6 text-yellow-300 transition-transform duration-300 ${isScoreboardExpanded ? 'rotate-180' : ''}`, fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 2 },
+                  React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: `h-6 w-6 text-title-yellow transition-transform duration-300 ${isScoreboardExpanded ? 'rotate-180' : ''}`, fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 2 },
                     React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M19 9l-7 7-7-7" })
                   )
                 )
               ),
               React.createElement('div', { className: "flex-grow overflow-y-auto relative custom-scrollbar" },
                 React.createElement('table', { className: "w-full table-fixed text-sm text-left text-gray-300 border-collapse" },
-                  React.createElement('thead', { className: "text-xs text-yellow-300 uppercase bg-slate-800 sticky top-0 z-10" },
+                  React.createElement('thead', { className: "text-xs text-title-yellow uppercase bg-slate-800 sticky top-0 z-10" },
                     React.createElement('tr', null, 
                       gameState.players.map(player => {
                         const index = player.id;
@@ -198,7 +198,7 @@ const GameUI = (props) => {
                         const isHostPlayer = player.id === gameState.hostId;
                         const isKickable = isHost && player.isClaimed && player.id !== myPlayerId;
                 
-                        let headerClasses = `h-14 sm:h-16 px-0 py-0 text-center align-middle transition-all duration-300 relative border-r border-slate-600 last:border-r-0 ${index === gameState.currentPlayerIndex && gameState.isGameStarted && !gameState.isGameOver && player.isClaimed ? 'bg-yellow-400 text-slate-900' : 'bg-slate-700/50'}`;
+                        let headerClasses = `h-14 sm:h-16 px-0 py-0 text-center align-middle transition-all duration-300 relative border-r border-slate-600 last:border-r-0 ${index === gameState.currentPlayerIndex && gameState.isGameStarted && !gameState.isGameOver && player.isClaimed ? 'bg-highlight text-slate-900' : 'bg-slate-700/50'}`;
                         if (isKickable) {
                             headerClasses += ' cursor-pointer hover:bg-red-800/60';
                         }
@@ -223,7 +223,7 @@ const GameUI = (props) => {
                                 )
                               : React.createElement('div', { className: "flex flex-col items-center justify-center h-full py-2" },
                                   React.createElement('div', { className: "w-full flex items-center justify-center px-1" },
-                                    isHostPlayer && React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: "h-4 w-4 mr-1 text-yellow-400 flex-shrink-0", viewBox: "0 0 24 24", fill: "currentColor" },
+                                    isHostPlayer && React.createElement('svg', { xmlns: "http://www.w3.org/2000/svg", className: "h-4 w-4 mr-1 text-red-500 flex-shrink-0", viewBox: "0 0 24 24", fill: "currentColor" },
                                       React.createElement('path', { d: "M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z" })
                                     ),
                                     React.createElement('span', { className: "truncate", title: player.name }, player.name)
@@ -289,7 +289,7 @@ const GameUI = (props) => {
                      React.createElement('tr', null, gameState.players.map((player) => {
                        const index = player.id;
                        const hasHistory = player.isClaimed || player.isSpectator || player.name !== `Игрок ${player.id + 1}`;
-                       return React.createElement('td', { key: `total-score-${player.id}`, className: `h-8 sm:h-10 px-1 sm:px-2 text-center text-lg font-mono align-middle transition-colors duration-300 border-r border-slate-600 last:border-r-0 ${index === gameState.currentPlayerIndex && gameState.isGameStarted && !gameState.isGameOver && player.isClaimed ? 'bg-yellow-400/80 text-slate-900' : 'bg-slate-900/50'}` }, 
+                       return React.createElement('td', { key: `total-score-${player.id}`, className: `h-8 sm:h-10 px-1 sm:px-2 text-center text-lg font-mono align-middle transition-colors duration-300 border-r border-slate-600 last:border-r-0 ${index === gameState.currentPlayerIndex && gameState.isGameStarted && !gameState.isGameOver && player.isClaimed ? 'bg-highlight/80 text-slate-900' : 'bg-slate-900/50'}` }, 
                          hasHistory ? calculateTotalScore(player) : ''
                        );
                      }))
@@ -348,7 +348,7 @@ const GameUI = (props) => {
                             )
                           : React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-4" },
                               React.createElement('button', { onClick: onRollDice, disabled: !isMyTurn || !gameState.canRoll, className: "w-full py-2 sm:py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, rollButtonText),
-                              React.createElement('button', { onClick: onBankScore, disabled: !isMyTurn || !gameState.canBank, className: "w-full py-2 sm:py-3 bg-yellow-500 hover:bg-yellow-600 text-slate-900 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Записать')
+                              React.createElement('button', { onClick: onBankScore, disabled: !isMyTurn || !gameState.canBank, className: "w-full py-2 sm:py-3 bg-action-yellow hover:bg-hover-yellow text-slate-900 rounded-lg text-xl font-bold uppercase tracking-wider transition-all duration-300 transform hover:scale-105 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100" }, 'Записать')
                             )
                 )
               )

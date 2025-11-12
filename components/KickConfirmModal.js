@@ -21,7 +21,7 @@ const KickConfirmModal = ({ playerToKick, onConfirm, onCancel }) => {
       React.createElement(
         'header',
         { className: "flex items-center justify-between mb-4" },
-        React.createElement('h2', { className: "font-ruslan text-3xl text-yellow-300" }, 'Подтверждение'),
+        React.createElement('h2', { className: "font-ruslan text-3xl text-title-yellow" }, 'Подтверждение'),
         React.createElement(
           'button',
           {

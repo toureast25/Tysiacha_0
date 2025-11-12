@@ -1,5 +1,3 @@
-
-
 // 
 import React from 'react';
 
@@ -21,7 +19,7 @@ const SpectatorsModal = ({ spectators, onClose }) => {
       React.createElement(
         'header',
         { className: "flex items-center justify-between p-3 sm:p-4 border-b border-slate-700 flex-shrink-0" },
-        React.createElement('h2', { className: "font-ruslan text-3xl text-yellow-300" }, `Зрители (${spectators.length})`),
+        React.createElement('h2', { className: "font-ruslan text-3xl text-title-yellow" }, `Зрители (${spectators.length})`),
         React.createElement(
           'button',
           {

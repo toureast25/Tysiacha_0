@@ -104,7 +104,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
   
   if (connectionStatus !== 'connected' || !gameState) {
     return React.createElement('div', { className: "text-center" }, 
-      React.createElement('h2', { className: "font-ruslan text-4xl text-yellow-300 mb-4" }, 'Подключение...'),
+      React.createElement('h2', { className: "font-ruslan text-4xl text-title-yellow mb-4" }, 'Подключение...'),
       React.createElement('p', { className: "text-lg" }, 
         connectionStatus === 'connecting' ? 'Устанавливаем связь с сервером...' : 
         connectionStatus === 'reconnecting' ? 'Потеряна связь, переподключаемся...' :

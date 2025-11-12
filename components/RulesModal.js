@@ -1,5 +1,3 @@
-
-
 // 
 import React from 'react';
 
@@ -21,7 +19,7 @@ const RulesModal = ({ onClose }) => {
       React.createElement(
         'header',
         { className: "flex items-center justify-between p-3 sm:p-4 border-b border-slate-700 flex-shrink-0" },
-        React.createElement('h2', { className: "font-ruslan text-3xl text-yellow-300" }, 'Правила Игры "Тысяча"'),
+        React.createElement('h2', { className: "font-ruslan text-3xl text-title-yellow" }, 'Правила Игры "Тысяча"'),
         React.createElement(
           'button',
           {
@@ -42,13 +40,13 @@ const RulesModal = ({ onClose }) => {
         React.createElement(
           'section',
           null,
-          React.createElement('h3', { className: "text-xl font-bold text-yellow-400 mb-2" }, '1. Цель игры'),
+          React.createElement('h3', { className: "text-xl font-bold text-highlight mb-2" }, '1. Цель игры'),
           React.createElement('p', null, 'Первый игрок, набравший 1000 или более очков по итогам завершенного раунда, объявляется победителем.')
         ),
         React.createElement(
           'section',
           null,
-          React.createElement('h3', { className: "text-xl font-bold text-yellow-400 mb-2" }, '2. Ход игрока'),
+          React.createElement('h3', { className: "text-xl font-bold text-highlight mb-2" }, '2. Ход игрока'),
           React.createElement(
             'ul',
             { className: "list-disc list-inside space-y-1" },
@@ -71,7 +69,7 @@ const RulesModal = ({ onClose }) => {
         React.createElement(
           'section',
           null,
-          React.createElement('h3', { className: "text-xl font-bold text-yellow-400 mb-2" }, '3. Подсчет очков'),
+          React.createElement('h3', { className: "text-xl font-bold text-highlight mb-2" }, '3. Подсчет очков'),
           React.createElement('p', { className: "mb-2 italic text-gray-400" }, 'Важно: Комбинация засчитывается, только если все её кости выпали в одном броске.'),
           React.createElement(
             'div',
@@ -127,7 +125,7 @@ const RulesModal = ({ onClose }) => {
         React.createElement(
           'section',
           null,
-          React.createElement('h3', { className: "text-xl font-bold text-yellow-400 mb-2" }, '4. Особые ситуации и Штрафы'),
+          React.createElement('h3', { className: "text-xl font-bold text-highlight mb-2" }, '4. Особые ситуации и Штрафы'),
           React.createElement(
             'dl',
             { className: "space-y-3 sm:space-y-4" },
@@ -165,7 +163,7 @@ const RulesModal = ({ onClose }) => {
                   'dd',
                   { className: "ml-4 space-y-2" },
                    React.createElement('p', null, 'Если другой игрок своим ходом догоняет или обгоняет вас по очкам, вы получаете штраф -50 очков. Штраф применяется, только если у вас было 100 или более очков.'),
-                   React.createElement('p', null, React.createElement('strong', { className: 'text-yellow-400' }, 'Исключение:'), ' Штраф не начисляется, если из-за него ваш счёт попадёт в диапазон "бочки" (например, при счёте 210 вы не получите штраф до 160).')
+                   React.createElement('p', null, React.createElement('strong', { className: 'text-highlight' }, 'Исключение:'), ' Штраф не начисляется, если из-за него ваш счёт попадёт в диапазон "бочки" (например, при счёте 210 вы не получите штраф до 160).')
                 )
             ),
             React.createElement('div', null,
@@ -174,9 +172,9 @@ const RulesModal = ({ onClose }) => {
                     'dd',
                     { className: "ml-4 mt-1 space-y-2" },
                      React.createElement('p', null, 'Игрок считается "на бочке", если его счёт находится в диапазоне 200-295 или 700-795 очков.'),
-                     React.createElement('p', null, React.createElement('strong', { className: 'text-yellow-400' }, 'Обязательный выход:'), ' Находясь на бочке, вы обязаны за один ход набрать столько очков, чтобы ваш суммарный счёт стал 300+ (или 800+). Если вы записываете ход, но итоговый счёт остаётся меньше 300 (или 800), вы получаете "болт" — все очки за ход сгорают.'),
-                     React.createElement('p', null, React.createElement('strong', { className: 'text-yellow-400' }, 'Штраф за 3 болта:'), ' Если вы получаете три "болта" подряд, находясь на одной и той же бочке, ваш счёт откатывается до 150 (или 650) очков соответственно.'),
-                     React.createElement('p', null, React.createElement('strong', { className: 'text-yellow-400' }, 'Столкновение:'), ' На одной "бочке" может быть только один игрок. Если вы своим ходом попадаете на бочку, где уже стоит другой игрок, тот игрок "сбивается" и его счёт откатывается до 150 (или 650) очков.')
+                     React.createElement('p', null, React.createElement('strong', { className: 'text-highlight' }, 'Обязательный выход:'), ' Находясь на бочке, вы обязаны за один ход набрать столько очков, чтобы ваш суммарный счёт стал 300+ (или 800+). Если вы записываете ход, но итоговый счёт остаётся меньше 300 (или 800), вы получаете "болт" — все очки за ход сгорают.'),
+                     React.createElement('p', null, React.createElement('strong', { className: 'text-highlight' }, 'Штраф за 3 болта:'), ' Если вы получаете три "болта" подряд, находясь на одной и той же бочке, ваш счёт откатывается до 150 (или 650) очков соответственно.'),
+                     React.createElement('p', null, React.createElement('strong', { className: 'text-highlight' }, 'Столкновение:'), ' На одной "бочке" может быть только один игрок. Если вы своим ходом попадаете на бочку, где уже стоит другой игрок, тот игрок "сбивается" и его счёт откатывается до 150 (или 650) очков.')
                 )
             )
           )
@@ -184,7 +182,7 @@ const RulesModal = ({ onClose }) => {
         React.createElement(
           'section',
           null,
-          React.createElement('h3', { className: "text-xl font-bold text-yellow-400 mb-2" }, '5. Управление'),
+          React.createElement('h3', { className: "text-xl font-bold text-highlight mb-2" }, '5. Управление'),
           React.createElement(
             'ul',
             { className: "list-disc list-inside space-y-1" },

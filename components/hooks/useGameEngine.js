@@ -42,8 +42,9 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         let newStatus = playerCopy.status;
         
         if (lastSeen > 0) {
-            if (now - lastSeen > 60000) newStatus = 'disconnected';
-            else if (now - lastSeen > 10000) newStatus = 'away';
+            // Смягченные пороги для мобильных устройств
+            if (now - lastSeen > 90000) newStatus = 'disconnected'; // 1.5 минуты до отключения
+            else if (now - lastSeen > 20000) newStatus = 'away';      // 20 секунд до "отошел"
             else newStatus = 'online';
         } else if (playerCopy.status !== 'offline') {
             newStatus = 'offline';

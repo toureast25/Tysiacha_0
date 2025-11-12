@@ -32,7 +32,7 @@ export const DiceIcon = ({ value, isSelected, onClick, onDragStart, onDoubleClic
   }
 
   if (isSelected) {
-      stateClasses = "border-yellow-400 scale-105 shadow-lg shadow-yellow-400/50 cursor-pointer";
+      stateClasses = "border-highlight scale-105 shadow-lg shadow-highlight/50 cursor-pointer";
   }
   
   if (value === 0) {
