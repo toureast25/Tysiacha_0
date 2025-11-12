@@ -1,4 +1,5 @@
 
+
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -8,8 +9,16 @@ html, body, #root {
 
 body {
   font-family: 'Roboto Condensed', sans-serif;
-  background-color: #1a1a1a;
+  background: hsl(224, 38%, 41%);
+  animation: gradient 15s infinite alternate linear;
 }
+
+@keyframes gradient {
+  100% {
+    background: hsl(338, 38%, 41%);
+  }
+}
+
 .font-ruslan {
   font-family: 'Ruslan Display', cursive;
 }
