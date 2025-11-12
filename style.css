@@ -1,5 +1,4 @@
 
-
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -9,7 +8,7 @@ html, body, #root {
 
 body {
   font-family: 'Roboto Condensed', sans-serif;
-  background-color: #020617; /* slate-950 */
+  background-color: #1a1a1a;
 }
 .font-ruslan {
   font-family: 'Ruslan Display', cursive;

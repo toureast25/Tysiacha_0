@@ -136,11 +136,12 @@ const App = () => {
   return React.createElement(
     'main',
     {
-      className: "w-full h-full bg-gradient-radial from-slate-900 to-slate-950 text-white"
+      className: "w-full h-full bg-cover bg-center bg-no-repeat text-white",
+      style: { backgroundImage: "url('https://images.unsplash.com/photo-1585501374353-8199cf8e1324?q=80&w=1920&auto=format&fit=crop')" }
     },
     React.createElement(
       'div',
-      { className: "w-full h-full flex items-center justify-center" },
+      { className: "w-full h-full bg-black/70 backdrop-blur-sm flex items-center justify-center" },
       renderScreen()
     )
   );
