@@ -430,7 +430,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         if (restoredScore > 0) delete newLeavers[playerName];
         const newPlayers = state.players.map((p, i) => i === joinIndex ? { ...p, name: playerName, isClaimed: true, scores: restoredScore > 0 ? [restoredScore] : [], status: 'online', sessionId: mySessionId, hasEnteredGame: restoredScore > 0, lastSeen: Date.now() } : p);
         let newHostId = state.hostId === null ? findNextHost(newPlayers) ?? joinIndex : state.hostId;
-        publishState({ players: newPlayers, leavers: newLeavers, hostId: newHostId, gameMessage: `${playerName} присоединился.` });
+        publishState({ ...state, players: newPlayers, leavers: newLeavers, hostId: newHostId, gameMessage: `${playerName} присоединился.` });
       }
     });
   };
