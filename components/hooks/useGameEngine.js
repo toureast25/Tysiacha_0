@@ -42,9 +42,8 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         let newStatus = playerCopy.status;
         
         if (lastSeen > 0) {
-            // Смягченные пороги для мобильных устройств
-            if (now - lastSeen > 90000) newStatus = 'disconnected'; // 1.5 минуты до отключения
-            else if (now - lastSeen > 20000) newStatus = 'away';      // 20 секунд до "отошел"
+            if (now - lastSeen > 90000) newStatus = 'disconnected';
+            else if (now - lastSeen > 20000) newStatus = 'away';
             else newStatus = 'online';
         } else if (playerCopy.status !== 'offline') {
             newStatus = 'offline';
@@ -59,7 +58,6 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
     return { updatedPlayers, needsUpdate };
   }, []);
   
-  // Interval for checking player statuses
   React.useEffect(() => {
       const statusCheckInterval = setInterval(() => {
           const state = gameStateRef.current;
@@ -74,6 +72,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
               if (isHostInvalid) {
                   newState.hostId = findNextHost(updatedPlayers);
               }
+              // Отправляем полное состояние, так как статус влияет на логику хоста
               publishState(newState);
           }
       }, 5000);
@@ -93,21 +92,20 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
           isClaimed: true,
           status: 'online',
           sessionId: mySessionId,
+          lastSeen: Date.now(),
       };
       setMyPlayerId(0);
       initialState.gameMessage = `${playerName} создал(а) игру. Ожидание других игроков...`;
       const stateWithVersion = { ...initialState, version: 1, turnStartTime: Date.now() };
-      setGameState(stateWithVersion);
-      publishState(stateWithVersion); // Publish the very first state
+      publishState(stateWithVersion); // Publish the very first state (full)
       return;
     }
 
     const currentState = gameStateRef.current;
-    if (currentState && lastReceivedState.version <= currentState.version) {
+    if (currentState && lastReceivedState.version <= currentState.version && lastReceivedState.version !== undefined) {
       return;
     }
 
-    // --- Self-identification and state update ---
     const myNewData = lastReceivedState.players.find(p => p.sessionId === mySessionId);
     const iAmNowASpectator = lastReceivedState.spectators.some(s => s.id === mySessionId);
 
@@ -127,7 +125,6 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
     const currentState = gameStateRef.current;
     if (!currentState) return;
     
-    // Always use fresh statuses for any action
     const { updatedPlayers } = updateAllPlayerStatuses(currentState.players);
     const updatedState = { ...currentState, players: updatedPlayers };
     
@@ -139,7 +136,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         if (myPlayerId !== state.hostId || state.isGameStarted) return;
         const claimedPlayerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
         if (claimedPlayerCount < 2) {
-            publishState({ ...state, gameMessage: "Нужно как минимум 2 игрока, чтобы начать." });
+            publishState({ gameMessage: "Нужно как минимум 2 игрока, чтобы начать." }, true);
             return;
         }
         const firstPlayer = state.players[state.currentPlayerIndex];
@@ -152,7 +149,13 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         const newPlayers = Array.from({ length: 5 }, (_, index) => {
             const oldPlayer = state.players.find(p => p && p.id === index);
             if (oldPlayer && oldPlayer.isClaimed && !oldPlayer.isSpectator) {
-                return { id: oldPlayer.id, name: oldPlayer.name, scores: [], isClaimed: true, status: oldPlayer.status, isSpectator: false, sessionId: oldPlayer.sessionId, hasEnteredGame: false, barrelBolts: 0, justResetFromBarrel: false };
+                return {
+                    ...oldPlayer, 
+                    scores: [],
+                    hasEnteredGame: false,
+                    barrelBolts: 0,
+                    justResetFromBarrel: false,
+                };
             }
             return { ...createInitialState().players[0], id: index, name: `Игрок ${index + 1}` };
         });
@@ -186,9 +189,9 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
             const nextPlayer = newPlayers[nextPlayerIndex];
             let gameMessage = `${currentPlayer.name} получает болт! Ход ${nextPlayer.name}.`;
             if (!nextPlayer.hasEnteredGame) gameMessage += ` Ему нужно 50+ для входа.`;
-            publishState({ ...createInitialState(), players: newPlayers.map(p => ({ ...p, justResetFromBarrel: false })), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, currentPlayerIndex: nextPlayerIndex, diceOnBoard: newDice, gameMessage, turnStartTime: Date.now(), canRoll: true }, true);
+            publishState({ ...createInitialState(), players: newPlayers.map(p => ({ ...p, justResetFromBarrel: false })), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, currentPlayerIndex: nextPlayerIndex, diceOnBoard: newDice, gameMessage, turnStartTime: Date.now(), canRoll: true });
         } else {
-            publishState({ ...state, diceOnBoard: newDice, keptDiceThisTurn: isHotDiceRoll ? [] : state.keptDiceThisTurn, diceKeptFromThisRoll: [], scoreFromPreviousRolls: state.currentTurnScore, gameMessage: `Ваш бросок. Выберите очковые кости.`, canRoll: false, canBank: true, selectedDiceIndices: [], canKeep: false, potentialScore: 0 }, true);
+            publishState({ ...state, diceOnBoard: newDice, keptDiceThisTurn: isHotDiceRoll ? [] : state.keptDiceThisTurn, diceKeptFromThisRoll: [], scoreFromPreviousRolls: state.currentTurnScore, gameMessage: `Ваш бросок. Выберите очковые кости.`, canRoll: false, canBank: true, selectedDiceIndices: [], canKeep: false, potentialScore: 0 });
         }
     },
     toggleDieSelection: (state, { index }) => {
@@ -204,13 +207,20 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
                 validation = { isValid: true, score: combinedValidation.score - validateSelection(state.diceKeptFromThisRoll).score };
             }
         }
-        publishState({ ...state, selectedDiceIndices: newSelectedIndices, canKeep: validation.isValid, potentialScore: validation.score > 0 ? validation.score : 0, gameMessage: validation.isValid ? `Выбрано +${validation.score}.` : `Выберите корректную комбинацию.` }, true);
+        
+        const delta = {
+            selectedDiceIndices: newSelectedIndices,
+            canKeep: validation.isValid,
+            potentialScore: validation.score > 0 ? validation.score : 0,
+            gameMessage: validation.isValid ? `Выбрано +${validation.score}.` : `Выберите корректную комбинацию.`
+        };
+        publishState(delta, true); // Отправляем только дельту
     },
     keepDice: (state, { indices }) => {
         const combinedDice = [...state.diceKeptFromThisRoll, ...indices.map(i => state.diceOnBoard[i])];
         const validation = validateSelection(combinedDice);
         if (!validation.isValid) {
-            publishState({ ...state, gameMessage: "Неверный выбор." }, true);
+            publishState({ gameMessage: "Неверный выбор." }, true);
             return;
         }
         const newTurnScore = state.scoreFromPreviousRolls + validation.score;
@@ -218,7 +228,20 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         const newKeptDiceThisTurn = [...state.keptDiceThisTurn, ...indices.map(i => state.diceOnBoard[i])];
         const newDiceOnBoard = state.diceOnBoard.filter((_, i) => !indices.includes(i));
         const isHotDice = newDiceOnBoard.length === 0;
-        publishState({ ...state, currentTurnScore: newTurnScore, keptDiceThisTurn: newKeptDiceThisTurn, diceKeptFromThisRoll: isHotDice ? [] : combinedDice, diceOnBoard: newDiceOnBoard, gameMessage: `+${scoreAdded}! Очки за ход: ${newTurnScore}. ${isHotDice ? 'Все кости сыграли!' : 'Бросайте снова или запишите.'}`, canRoll: true, canBank: true, selectedDiceIndices: [], canKeep: false, potentialScore: 0 }, true);
+
+        const delta = {
+            currentTurnScore: newTurnScore,
+            keptDiceThisTurn: newKeptDiceThisTurn,
+            diceKeptFromThisRoll: isHotDice ? [] : combinedDice,
+            diceOnBoard: newDiceOnBoard,
+            gameMessage: `+${scoreAdded}! Очки за ход: ${newTurnScore}. ${isHotDice ? 'Все кости сыграли!' : 'Бросайте снова или запишите.'}`,
+            canRoll: true,
+            canBank: true,
+            selectedDiceIndices: [],
+            canKeep: false,
+            potentialScore: 0
+        };
+        publishState(delta, true); // Отправляем дельту
     },
     bankScore: (state) => {
         if (!state.canBank || state.isGameOver) return;
@@ -250,7 +273,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         };
 
         if (finalTurnScore === 0) {
-            publishState(getBoltState(currentPlayer), true);
+            publishState(getBoltState(currentPlayer));
             return;
         }
 
@@ -259,7 +282,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
             const nextPlayer = state.players[nextIdx];
             let msg = `${currentPlayer.name} не набрал 50 для входа. Ход ${nextPlayer.name}.`;
             if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
-            publishState({ ...createInitialState(), players: state.players, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() }, true);
+            publishState({ ...createInitialState(), players: state.players, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
             return;
         }
 
@@ -268,7 +291,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         const failedBarrel = (barrelStatus === '200-300' && totalBefore + finalTurnScore < 300) || (barrelStatus === '700-800' && totalBefore + finalTurnScore < 800);
 
         if (failedBarrel) {
-            publishState(getBoltState(currentPlayer, barrelStatus), true);
+            publishState(getBoltState(currentPlayer, barrelStatus));
             return;
         }
         
@@ -297,7 +320,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         });
         
         if (newTotal >= 1000) {
-            publishState({ ...createInitialState(), players: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameOver: true, gameMessage: `${currentPlayer.name} победил, набрав ${newTotal}!` }, true);
+            publishState({ ...createInitialState(), players: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameOver: true, gameMessage: `${currentPlayer.name} победил, набрав ${newTotal}!` });
             return;
         }
 
@@ -307,7 +330,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
         const nextBarrel = getPlayerBarrelStatus(nextPlayer);
         if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
         else if (nextBarrel) msg += ` Он(а) на бочке.`;
-        publishState({ ...createInitialState(), players: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() }, true);
+        publishState({ ...createInitialState(), players: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
     },
     skipTurn: (state) => {
         if(state.isGameOver || myPlayerId === state.currentPlayerIndex) return;
@@ -374,7 +397,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
   const handleLeaveGame = () => {
     if (isSpectator) {
       const state = gameStateRef.current;
-      if(state) publishState({...state, spectators: state.spectators.filter(s => s.id !== mySessionId)});
+      if(state) publishState({spectators: state.spectators.filter(s => s.id !== mySessionId)}, true);
       return;
     }
     if (myPlayerId !== null) {
@@ -391,7 +414,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
       if (availableSlots === 0) {
         if (window.confirm("Нет мест. Присоединиться зрителем?")) {
           const newSpectator = { name: playerName, id: mySessionId };
-          publishState({ ...state, spectators: [...state.spectators, newSpectator] });
+          publishState({ spectators: [...state.spectators, newSpectator] }, true);
           setIsSpectator(true);
         }
         return;
@@ -399,15 +422,15 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
 
       if (state.isGameStarted && !state.isGameOver) {
         const newRequest = { name: playerName, sessionId: mySessionId, timestamp: Date.now() };
-        publishState({ ...state, joinRequests: [...(state.joinRequests || []), newRequest], gameMessage: `${playerName} хочет присоединиться.` }, true);
+        publishState({ joinRequests: [...(state.joinRequests || []), newRequest], gameMessage: `${playerName} хочет присоединиться.` }, true);
       } else {
         const joinIndex = state.players.findIndex(p => !p.isClaimed);
         const restoredScore = state.leavers?.[playerName] || 0;
         const newLeavers = { ...state.leavers };
         if (restoredScore > 0) delete newLeavers[playerName];
-        const newPlayers = state.players.map((p, i) => i === joinIndex ? { ...p, name: playerName, isClaimed: true, scores: restoredScore > 0 ? [restoredScore] : [], status: 'online', sessionId: mySessionId, hasEnteredGame: restoredScore > 0 } : p);
+        const newPlayers = state.players.map((p, i) => i === joinIndex ? { ...p, name: playerName, isClaimed: true, scores: restoredScore > 0 ? [restoredScore] : [], status: 'online', sessionId: mySessionId, hasEnteredGame: restoredScore > 0, lastSeen: Date.now() } : p);
         let newHostId = state.hostId === null ? findNextHost(newPlayers) ?? joinIndex : state.hostId;
-        publishState({ ...state, players: newPlayers, leavers: newLeavers, hostId: newHostId, gameMessage: `${playerName} присоединился.` }, true);
+        publishState({ players: newPlayers, leavers: newLeavers, hostId: newHostId, gameMessage: `${playerName} присоединился.` }, true);
       }
     });
   };
@@ -424,7 +447,7 @@ const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId)
       if (accepted) {
           const joinIndex = newState.players.findIndex(p => !p.isClaimed);
           if (joinIndex !== -1) {
-              const newPlayers = newState.players.map((p, i) => i === joinIndex ? { ...p, name: request.name, isClaimed: true, status: 'online', sessionId: request.sessionId } : p);
+              const newPlayers = newState.players.map((p, i) => i === joinIndex ? { ...p, name: request.name, isClaimed: true, status: 'online', sessionId: request.sessionId, lastSeen: Date.now() } : p);
               newState = { ...newState, players: newPlayers, gameMessage: `${request.name} присоединился.` };
           } else {
               newState = { ...newState, spectators: [...newState.spectators, { name: request.name, id: request.sessionId }], gameMessage: `Для ${request.name} не нашлось места.` };

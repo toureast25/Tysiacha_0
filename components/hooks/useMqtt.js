@@ -8,7 +8,6 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
   const mqttClientRef = React.useRef(null);
   const isStateReceivedRef = React.useRef(false);
   
-  // Ref to hold the latest state without causing re-renders or dependency issues
   const lastReceivedStateRef = React.useRef(lastReceivedState);
   React.useEffect(() => {
     lastReceivedStateRef.current = lastReceivedState;
@@ -16,35 +15,44 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
 
   const topic = `${MQTT_TOPIC_PREFIX}/${roomCode}`;
   const presenceTopic = `${topic}/presence`;
+  const actionsTopic = `${topic}/actions`; // Новый топик для дельта-обновлений
 
-  const publishState = React.useCallback((newState, isOptimisticUpdate = false) => {
+  const publishState = React.useCallback((newState, isDelta = false) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
-      // Use the ref to get the most current version number
-      const currentVersion = lastReceivedStateRef.current?.version || 0;
-      const { senderId, ...stateWithoutSender } = newState;
+      const targetTopic = isDelta ? actionsTopic : topic;
+      const retain = !isDelta; // Сохраняем только полные состояния
+
+      // Для полных состояний инкрементируем версию
+      if (!isDelta) {
+          const currentVersion = lastReceivedStateRef.current?.version || 0;
+          newState.version = currentVersion + 1;
+      }
       
-      const finalState = {
+      const { senderId, ...stateWithoutSender } = newState;
+      const finalPayload = {
         ...stateWithoutSender,
-        version: currentVersion + 1,
         senderId: mySessionId,
       };
 
-      if (isOptimisticUpdate) {
-        setLastReceivedState(finalState);
+      // Оптимистичное обновление для любого типа публикации
+      if (isDelta) {
+        setLastReceivedState(s => s ? { ...s, ...finalPayload } : null);
+      } else {
+        setLastReceivedState(finalPayload);
       }
       
-      mqttClientRef.current.publish(topic, JSON.stringify(finalState), { retain: true });
+      mqttClientRef.current.publish(targetTopic, JSON.stringify(finalPayload), { retain });
     }
-  }, [topic, mySessionId]); // Removed lastReceivedState from dependencies
+  }, [topic, actionsTopic, mySessionId]);
 
 
   React.useEffect(() => {
     const connectOptions = {
-      clientId: `tysiacha-pwa-${mySessionId}`, // СТАБИЛЬНЫЙ ID на всю сессию вкладки
+      clientId: `tysiacha-pwa-${mySessionId}`,
       clean: true,
-      connectTimeout: 8000, // Увеличено до 8 секунд для медленных сетей
-      reconnectPeriod: 5000, // Увеличена задержка для стабильности
-      keepalive: 30, // Пинги для поддержания соединения
+      connectTimeout: 8000,
+      reconnectPeriod: 5000,
+      keepalive: 30,
     };
     const client = mqtt.connect(MQTT_BROKER_URL, connectOptions);
     mqttClientRef.current = client;
@@ -54,11 +62,10 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
       setConnectionStatus('connected');
       client.subscribe(topic);
       client.subscribe(presenceTopic);
+      client.subscribe(actionsTopic); // Подписываемся на новый топик
 
-      // Timeout to check if we need to create the initial state
       setTimeout(() => {
         if (!isStateReceivedRef.current) {
-          // This will be handled by the game engine hook now
           setLastReceivedState({ isInitial: true });
         }
       }, 1500);
@@ -66,48 +73,50 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
 
     client.on('message', (receivedTopic, message) => {
       const messageString = message.toString();
-      if (receivedTopic === topic) {
-        isStateReceivedRef.current = true;
-        try {
-          const receivedState = JSON.parse(messageString);
-          setLastReceivedState(currentState => {
-            if (currentState && receivedState.version <= currentState.version) {
-              return currentState; // Old or same version, ignore.
-            }
-            return receivedState;
-          });
-        } catch (e) {
-          console.error('Error parsing game state:', e);
+      try {
+        const payload = JSON.parse(messageString);
+        
+        // Игнорируем сообщения, отправленные нами же (кроме полных обновлений для консистентности)
+        if (payload.senderId === mySessionId && receivedTopic === actionsTopic) {
+            return;
         }
-      } else if (receivedTopic === presenceTopic) {
-        setLastReceivedState(currentState => {
-            if (!currentState) return null;
-            try {
-                const { playerId } = JSON.parse(messageString);
-                const now = Date.now();
-                
-                // Update timestamp without causing a full re-render if state is unchanged
-                const player = currentState.players.find(p => p.id === playerId);
-                if (player) {
-                  player.lastSeen = now;
-                }
-                
-                // Immediate status update on heartbeat
-                if (player && player.isClaimed && player.status !== 'online') {
-                    const newPlayers = currentState.players.map(p => 
-                        p.id === playerId ? { ...p, status: 'online', lastSeen: now } : p
-                    );
-                    const newState = { ...currentState, players: newPlayers };
-                    // We can publish this small update directly.
-                    // IMPORTANT: We call the stable publishState function here
-                    publishState(newState); 
-                    return newState; // Optimistically update local state
-                }
-                return { ...currentState }; // Return a new object to trigger updates if needed
-            } catch (e) {
-                 return currentState;
+
+        if (receivedTopic === topic) {
+          isStateReceivedRef.current = true;
+          setLastReceivedState(currentState => {
+            if (currentState && payload.version <= currentState.version) {
+              return currentState;
             }
-        });
+            return payload;
+          });
+        } else if (receivedTopic === actionsTopic) {
+          // Применяем дельта-обновление, не трогая версию
+          setLastReceivedState(s => s ? { ...s, ...payload } : null);
+        
+        } else if (receivedTopic === presenceTopic) {
+          setLastReceivedState(currentState => {
+            if (!currentState) return null;
+            const { playerId } = payload;
+            const now = Date.now();
+            
+            const player = currentState.players.find(p => p.id === playerId);
+            if (player) {
+              player.lastSeen = now;
+            }
+            
+            if (player && player.isClaimed && player.status !== 'online') {
+              const newPlayers = currentState.players.map(p => 
+                p.id === playerId ? { ...p, status: 'online', lastSeen: now } : p
+              );
+              const newState = { ...currentState, players: newPlayers };
+              publishState(newState, true); // Отправляем как дельту
+              return newState;
+            }
+            return { ...currentState };
+          });
+        }
+      } catch (e) {
+        console.error(`Error parsing message on topic ${receivedTopic}:`, e);
       }
     });
 
@@ -130,11 +139,10 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
     return () => {
       clearInterval(heartbeatInterval);
       if (client) {
-        client.end(true); // Force close connection
+        client.end(true);
       }
     };
-  // publishState теперь стабильна и не вызывает пересоздание подключения
-  }, [roomCode, mySessionId, topic, presenceTopic, publishState]);
+  }, [roomCode, mySessionId, topic, presenceTopic, actionsTopic, publishState]);
 
   return { connectionStatus, lastReceivedState, publishState };
 };
