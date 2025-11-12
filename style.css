@@ -1,5 +1,3 @@
-
-
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -9,8 +7,23 @@ html, body, #root {
 
 body {
   font-family: 'Roboto Condensed', sans-serif;
-  /* Серый круглый (эллиптический) градиент от центра */
-  background: radial-gradient(ellipse at center, #311e3f 0%, #097763 100%);
+  /* Начальное состояние фона для анимации */
+  background: radial-gradient(ellipse at center, #097763 0%, #311e3f 100%);
+  /* Анимация пульсации фона */
+  animation: pulse-background 12s ease-in-out infinite;
+}
+
+@keyframes pulse-background {
+  0% {
+    background: radial-gradient(ellipse at center, #097763 0%, #311e3f 100%);
+  }
+  50% {
+    /* В середине анимации центральный цвет становится светлее и немного расширяется */
+    background: radial-gradient(ellipse at center, #0c9c80 20%, #492c5e 100%);
+  }
+  100% {
+    background: radial-gradient(ellipse at center, #097763 0%, #311e3f 100%);
+  }
 }
 
 .font-ruslan {
