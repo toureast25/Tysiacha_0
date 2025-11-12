@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tysiacha-cache-v6';
+const CACHE_NAME = 'tysiacha-cache-v7'; // Increment cache version
 const urlsToCache = [
   '.', // Кэшируем корневую директорию (эквивалент '/')
   'index.html',
@@ -15,7 +15,9 @@ const urlsToCache = [
   'components/RulesModal.js',
   'components/SpectatorsModal.js',
   'components/KickConfirmModal.js',
-  'components/PlayerContextMenu.js'
+  'components/PlayerContextMenu.js',
+  'components/hooks/useMqtt.js', // Add new hook
+  'components/hooks/useGameEngine.js' // Add new hook
 ];
 
 self.addEventListener('install', event => {
@@ -24,7 +26,13 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('Opened cache');
-        return cache.addAll(urlsToCache);
+        // Use addAll with a catch to prevent installation failure if one resource fails
+        const cachePromises = urlsToCache.map(urlToCache => {
+            return cache.add(urlToCache).catch(reason => {
+                console.log(`[SW] Caching failed for ${urlToCache}: ${reason}`);
+            });
+        });
+        return Promise.all(cachePromises);
       })
   );
 });
@@ -51,11 +59,14 @@ self.addEventListener('fetch', event => {
   // Для всех остальных запросов (скрипты, стили) сначала ищем в кэше
   event.respondWith(
     caches.match(event.request).then(cachedResponse => {
+      // Return cached response if found
       if (cachedResponse) {
         return cachedResponse;
       }
+
+      // Otherwise, fetch from network
       return fetch(event.request).then(networkResponse => {
-        // Если запрос успешен, клонируем ответ и сохраняем в кэш на будущее
+        // If request is successful, clone and cache the response
         if (networkResponse && networkResponse.status === 200) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then(cache => {
