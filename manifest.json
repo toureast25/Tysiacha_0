@@ -13,10 +13,39 @@
       "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSJub25lIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjY0IiBmaWxsPSIjZjRmN2U0Ii8+PGNpcmNsZSBjeD0iMTYwIiBjeT0iMTYwIiByPSI0MiIgZmlsbD0iIzFhMWExYSIvPjxjaXJjbGUgY3g9IjM1MiIgY3k9IjE2MCIgcj0iNDIiIGZpbGw9IiMxYTFhMWEiLz48Y2lyY2xlIGN4PSIyNTYiIGN5PSIyNTYiIHI9IjQyIiBmaWxsPSIjMWExYTFiYSIvPjxjaXJjbGUgY3g9IjE2MCIgY3k9IjM1MiIgcj0iNDIiIGZpbGw9IiMxYTFhMWEiLz48Y2lyY2xlIGN4PSIzNTIiIGN5PSIzNTIiIHI9IjQyIiBmaWxsPSIjMWExYTFiYSIvPjwvZz48L3N2Zz4=",
       "type": "image/svg+xml",
       "sizes": "512x512"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+PGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSJub25lIj48cGF0aCBkPSJNMCAwaDUxMnY1MTJIMHoiIGZpbGw9IiMxYTFhMWEiLz48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjMyMCIgeD0iOTYiIHk9Ijk2IiByeD0iNjQiIGZpbGw9IiNmNGY3ZTQiLz48Y2lyY2xlIGN4PSIyMDgiIGN5PSIyMDgiIHI9IjI4IiBmaWxsPSIjMWExYTFiYSIvPjxjaXJjbGUgY3g9IjMwNCIgY3k9IjIwOCIgcj0iMjgiIGZpbGw9IiMxYTFhMWEiLz48Y2lyY2xlIGN4PSIyNTYiIGN5PSIyNTYiIHI9IjI4IiBmaWxsPSIjMWExYTFiYSIvPjxjaXJjbGUgY3g9IjIwOCIgY3k9IjMwNCIgcj0iMjgiIGZpbGw9IiMxYTFhMWEiLz48Y2lyY2xlIGN4PSIzMDQiIGN5PSIzMDQiIHI9IjI4IiBmaWxsPSIjMWExYTFiYSIvPjwvZz48L3N2Zz4=",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ],
   "start_url": ".",
   "display": "standalone",
   "theme_color": "#1a1a1a",
-  "background_color": "#1a1a1a"
+  "background_color": "#1a1a1a",
+  "shortcuts": [
+    {
+      "name": "Создать новую игру",
+      "short_name": "Новая игра",
+      "description": "Создать новую игровую комнату и стать хостом",
+      "url": "/",
+      "icons": [{ "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48bGluZSB4MT0iMTIiIHkxPSI4IiB4Mj0iMTIiIHkyPSIxNiIvPjxsaW5lIHgxPSI4IiB5MT0iMTIiIHgyPSIxNiIgeTI9IjEyIi8+PC9zdmc+", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "https://placehold.co/1080x1920/1a1a1a/f4f7e4/png?text=Lobby%0A%D0%92%D1%85%D0%BE%D0%B4+%D0%B2+%D0%B8%D0%B3%D1%80%D1%83",
+      "type": "image/png",
+      "sizes": "1080x1920",
+      "form_factor": "narrow"
+    },
+    {
+      "src": "https://placehold.co/1920x1080/1a1a1a/f4f7e4/png?text=Game%20Screen%0A%D0%98%D0%B3%D1%80%D0%BE%D0%B2%D0%BE%D0%B5+%D0%BF%D0%BE%D0%BB%D0%B5",
+      "type": "image/png",
+      "sizes": "1920x1080",
+      "form_factor": "wide"
+    }
+  ]
 }
