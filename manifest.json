@@ -36,14 +36,14 @@
   ],
   "screenshots": [
     {
-      "src": "https://placehold.co/1080x1920/1a1a1a/f4f7e4/png?text=Lobby%0A%D0%92%D1%85%D0%BE%D0%B4+%D0%B2+%D0%B8%D0%B3%D1%80%D1%83",
-      "type": "image/png",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDgwIiBoZWlnaHQ9IjE5MjAiIHZpZXdCb3g9IjAgMCAxMDgwIDE5MjAiPgogIDxyZWN0IHdpZHRoPSIxMDgwIiBoZWlnaHQ9IjE5MjAiIGZpbGw9IiMxYTFhMWEiLz4KICA8dGV4dCB4PSI1NDAiIHk9IjkzMCIgZm9udC1mYW1pbHk9IlJ1c2xhbiBEaXNwbGF5LCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjkwIiBmaWxsPSIjZjRmN2U0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5Mb2JieTwvdGV4dD4KICA8dGV4dCB4PSI1NDAiIHk9IjEwNTAiIGZvbnQtZmFtaWx5PSJSb2JvdG8gQ29uZGVuc2VkLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjcwIiBmaWxsPSIjZjRmN2U0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7QktGL0L7QtCDQsiDQtdCz0YDQtTwvdGV4dD4KPC9zdmc+",
+      "type": "image/svg+xml",
       "sizes": "1080x1920",
       "form_factor": "narrow"
     },
     {
-      "src": "https://placehold.co/1920x1080/1a1a1a/f4f7e4/png?text=Game%20Screen%0A%D0%98%D0%B3%D1%80%D0%BE%D0%B2%D0%BE%D0%B5+%D0%BF%D0%BE%D0%BB%D0%B5",
-      "type": "image/png",
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOTIwIiBoZWlnaHQ9IjEwODAiIHZpZXdCb3g9IjAgMCAxOTIwIDEwODAiPgogIDxyZWN0IHdpZHRoPSIxOTIwIiBoZWlnaHQ9IjEwODAiIGZpbGw9IiMxYTFhMWEiLz4KICA8dGV4dCB4PSI5NjAiIHk9IjUxMCIgZm9udC1mYW1pbHk9IlJ1c2xhbiBEaXNwbGF5LCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjkwIiBmaWxsPSIjZjRmN2U0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5HYW1lIFNjcmVlbjwvdGV4dD4KICA8dGV4dCB4PSI5NjAiIHk9IjYzMCIgZm9udC1mYW1pbHk9IlJvYm90byBDb25kZW5zZWQsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iNzAiIGZpbGw9IiNmNGY3ZTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPtCY0LPRgNC+0LLQvtCyINC/0L7Qu9C4PC90ZXh0Pgo8L3N2Zz4=",
+      "type": "image/svg+xml",
       "sizes": "1920x1080",
       "form_factor": "wide"
     }
