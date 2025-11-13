@@ -381,7 +381,7 @@ const useGameEngine = (lastReceivedState, lastReceivedMqttAction, lastReceivedSy
     (toPeerId, signal) => publishSignal(toPeerId, signal), // onSignal
     (action) => setLastReceivedWebRTCAction({ ...action, uniqueId: `${action.sequence}-${action.timestamp}` }), // onData
     (peerId) => console.log(`[Engine] WebRTC connection established with ${peerId}`), // onConnect
-    (peerId) => { console.log(`[Engine] WebRTC connection lost with ${peerId}`); webRTC.closeConnection(peerId); } // onDisconnect
+    (peerId) => { console.log(`[Engine] WebRTC connection lost with ${peerId}`); } // onDisconnect
   );
 
   const myPlayerId = React.useMemo(() => {
