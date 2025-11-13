@@ -15,7 +15,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     }
   }, []);
 
-  const { connectionStatus, lastReceivedState, publishState } = useMqtt(roomCode, playerName, mySessionIdRef.current);
+  const { connectionStatus, lastReceivedState, lastReceivedAction, publishState, publishAction } = useMqtt(roomCode, playerName, mySessionIdRef.current);
 
   const {
     gameState,
@@ -25,7 +25,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     handleJoinGame,
     handleLeaveGame: engineHandleLeave,
     handleJoinRequest,
-  } = useGameEngine(lastReceivedState, publishState, playerName, mySessionIdRef.current);
+  } = useGameEngine(lastReceivedState, lastReceivedAction, publishState, publishAction, playerName, mySessionIdRef.current);
 
   const [isScoreboardExpanded, setIsScoreboardExpanded] = React.useState(false);
   const [isSpectatorsModalOpen, setIsSpectatorsModalOpen] = React.useState(false);
@@ -182,7 +182,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     onJoinRequest: handleJoinRequest,
     onToggleDieSelection: (index) => handleGameAction('toggleDieSelection', { index }),
     onDragStart: handleDragStart,
-    onDrop: handleDrop,
+    onDrop: onDrop,
     onDieDoubleClick: handleDieDoubleClick,
     onInitiateKick: handleInitiateKick,
     onConfirmKick: handleConfirmKick,

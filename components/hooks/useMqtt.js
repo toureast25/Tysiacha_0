@@ -5,6 +5,7 @@ import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../../constants.js';
 const useMqtt = (roomCode, playerName, mySessionId) => {
   const [connectionStatus, setConnectionStatus] = React.useState('connecting');
   const [lastReceivedState, setLastReceivedState] = React.useState(null);
+  const [lastReceivedAction, setLastReceivedAction] = React.useState(null);
   const mqttClientRef = React.useRef(null);
   const isStateReceivedRef = React.useRef(false);
   
@@ -15,35 +16,34 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
 
   const topic = `${MQTT_TOPIC_PREFIX}/${roomCode}`;
   const presenceTopic = `${topic}/presence`;
-  const actionsTopic = `${topic}/actions`; // Новый топик для дельта-обновлений
+  const actionsTopic = `${topic}/actions`;
 
-  const publishState = React.useCallback((newState, isDelta = false) => {
+  const publishState = React.useCallback((newState) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
-      const targetTopic = isDelta ? actionsTopic : topic;
-      const retain = !isDelta; // Сохраняем только полные состояния
-
-      // Для полных состояний инкрементируем версию
-      if (!isDelta) {
-          const currentVersion = lastReceivedStateRef.current?.version || 0;
-          newState.version = currentVersion + 1;
-      }
+      const currentVersion = lastReceivedStateRef.current?.version || 0;
+      newState.version = currentVersion + 1;
       
-      const { senderId, ...stateWithoutSender } = newState;
       const finalPayload = {
-        ...stateWithoutSender,
+        ...newState,
         senderId: mySessionId,
       };
 
-      // Оптимистичное обновление для любого типа публикации
-      if (isDelta) {
-        setLastReceivedState(s => s ? { ...s, ...finalPayload } : null);
-      } else {
-        setLastReceivedState(finalPayload);
-      }
+      setLastReceivedState(finalPayload);
       
-      mqttClientRef.current.publish(targetTopic, JSON.stringify(finalPayload), { retain });
+      mqttClientRef.current.publish(topic, JSON.stringify(finalPayload), { retain: true });
     }
-  }, [topic, actionsTopic, mySessionId]);
+  }, [topic, mySessionId]);
+
+  const publishAction = React.useCallback((action) => {
+      if (mqttClientRef.current && mqttClientRef.current.connected) {
+          const payload = {
+              ...action,
+              senderId: mySessionId,
+              timestamp: Date.now()
+          };
+          mqttClientRef.current.publish(actionsTopic, JSON.stringify(payload));
+      }
+  }, [actionsTopic, mySessionId]);
 
 
   React.useEffect(() => {
@@ -62,7 +62,7 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
       setConnectionStatus('connected');
       client.subscribe(topic);
       client.subscribe(presenceTopic);
-      client.subscribe(actionsTopic); // Подписываемся на новый топик
+      client.subscribe(actionsTopic);
 
       setTimeout(() => {
         if (!isStateReceivedRef.current) {
@@ -76,9 +76,8 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
       try {
         const payload = JSON.parse(messageString);
         
-        // Игнорируем сообщения, отправленные нами же (кроме полных обновлений для консистентности)
-        if (payload.senderId === mySessionId && receivedTopic === actionsTopic) {
-            return;
+        if (payload.senderId === mySessionId) {
+            return; // Игнорируем собственные действия и состояния
         }
 
         if (receivedTopic === topic) {
@@ -90,30 +89,10 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
             return payload;
           });
         } else if (receivedTopic === actionsTopic) {
-          // Применяем дельта-обновление, не трогая версию
-          setLastReceivedState(s => s ? { ...s, ...payload } : null);
+          setLastReceivedAction(payload);
         
         } else if (receivedTopic === presenceTopic) {
-          setLastReceivedState(currentState => {
-            if (!currentState) return null;
-            const { playerId } = payload;
-            const now = Date.now();
-            
-            const player = currentState.players.find(p => p.id === playerId);
-            if (player) {
-              player.lastSeen = now;
-            }
-            
-            if (player && player.isClaimed && player.status !== 'online') {
-              const newPlayers = currentState.players.map(p => 
-                p.id === playerId ? { ...p, status: 'online', lastSeen: now } : p
-              );
-              const newState = { ...currentState, players: newPlayers };
-              publishState(newState, true); // Отправляем как дельту
-              return newState;
-            }
-            return { ...currentState };
-          });
+          setLastReceivedAction({ type: 'presenceUpdate', payload });
         }
       } catch (e) {
         console.error(`Error parsing message on topic ${receivedTopic}:`, e);
@@ -142,9 +121,9 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
         client.end(true);
       }
     };
-  }, [roomCode, mySessionId, topic, presenceTopic, actionsTopic, publishState]);
+  }, [roomCode, mySessionId, topic, presenceTopic, actionsTopic]);
 
-  return { connectionStatus, lastReceivedState, publishState };
+  return { connectionStatus, lastReceivedState, lastReceivedAction, publishState, publishAction };
 };
 
 export default useMqtt;
