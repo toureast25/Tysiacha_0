@@ -18,7 +18,7 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
   React.useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
-
+  
   const findNextActivePlayer = React.useCallback((startIndex, players) => {
     let nextIndex = (startIndex + 1) % players.length;
     while (nextIndex !== startIndex) {
@@ -32,13 +32,53 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
   }, []);
 
   // --- Core Game Logic Reducer ---
+  // This function takes the current state and an action, and returns the new state.
+  // It's pure: it doesn't have side effects like publishing to MQTT.
   const applyAction = (state, action) => {
       if (!state || !action || !action.type) return state;
       const { type, payload } = action;
 
       switch (type) {
+          // --- Actions that still need full state sync ---
+          // These are complex actions where delta updates would be cumbersome.
+          // The handler will call publishState() after applying these.
+          case 'kickPlayer': {
+              const { playerId } = payload;
+              const playerToRemove = state.players.find(p => p.id === playerId);
+              if (!playerToRemove || !playerToRemove.isClaimed) return state;
+              
+              let newPlayersList = state.players.map(p => 
+                  p.id === playerId ? { ...createInitialState().players[0], id: p.id, name: `Игрок ${p.id + 1}` } : p
+              );
+              
+              const newSpectators = [...state.spectators, { name: playerToRemove.name, id: playerToRemove.sessionId }];
+              const newHostId = findNextHost(newPlayersList);
+              let finalState = { ...state, players: newPlayersList, spectators: newSpectators, hostId: newHostId, leavers: state.leavers };
+
+              const remainingPlayersCount = newPlayersList.filter(p => p.isClaimed && !p.isSpectator).length;
+
+              if (state.isGameStarted && !state.isGameOver && remainingPlayersCount < 2) {
+                  finalState.isGameOver = true;
+                  finalState.gameMessage = "Недостаточно игроков, игра окончена.";
+              } else if (state.currentPlayerIndex === playerId) {
+                  const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex -1, newPlayersList);
+                  const nextPlayer = newPlayersList[nextPlayerIndex];
+                  const baseReset = createInitialState();
+                  finalState = { 
+                      ...finalState, ...baseReset, players: newPlayersList, hostId: newHostId,
+                      spectators: newSpectators, leavers: state.leavers, isGameStarted: true, 
+                      canRoll: true, currentPlayerIndex: nextPlayerIndex,
+                      gameMessage: `${playerToRemove.name} исключен. Ход ${nextPlayer.name}.`,
+                      turnStartTime: Date.now()
+                  };
+              } else {
+                  finalState.gameMessage = `${playerToRemove.name} исключен.`;
+              }
+              return finalState;
+          }
+
+          // --- Actions that are broadcasted as deltas ---
           case 'startOfficialGame': {
-              if (payload.senderId !== state.hostId || state.isGameStarted) return state;
               const claimedPlayerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
               if (claimedPlayerCount < 2) {
                   return { ...state, gameMessage: "Нужно как минимум 2 игрока, чтобы начать." };
@@ -49,7 +89,6 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
               return { ...state, isGameStarted: true, canRoll: true, gameMessage, turnStartTime: Date.now() };
           }
           case 'newGame': {
-              if (payload.senderId !== state.hostId) return state;
               const newPlayers = Array.from({ length: 5 }, (_, index) => {
                   const oldPlayer = state.players.find(p => p && p.id === index);
                   if (oldPlayer && oldPlayer.isClaimed && !oldPlayer.isSpectator) {
@@ -222,26 +261,19 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
             return { ...createInitialState(), players: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() };
           }
           case 'skipTurn': {
-            if(state.isGameOver || payload.senderId === state.currentPlayerIndex) return state;
+            if(state.isGameOver) return state;
             const currentPlayer = state.players[state.currentPlayerIndex];
-            if(currentPlayer.status === 'online') return state;
             const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, '/'] } : p);
             const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
             const msg = `${currentPlayer.name} пропустил ход. Ход ${newPlayers[nextIdx].name}.`;
             return { ...createInitialState(), players: newPlayers.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() };
-          }
-          case 'kickPlayer': {
-              if (payload.senderId !== state.hostId) return state;
-              const { playerId } = payload;
-              // This is complex, better to handle with full state sync.
-              return state;
           }
           case 'presenceUpdate': {
               const { playerId } = payload;
               const player = state.players.find(p => p.id === playerId);
               if (player && player.isClaimed) {
                   const newPlayers = state.players.map(p => 
-                      p.id === playerId ? { ...p, lastSeen: Date.now(), status: 'online' } : p
+                      p.id === playerId ? { ...p, lastSeen: Date.now() } : p
                   );
                   return { ...state, players: newPlayers };
               }
@@ -252,26 +284,27 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
       }
   };
 
+  // Effect to process actions received from other players
   React.useEffect(() => {
       if (lastReceivedAction) {
           setGameState(currentState => applyAction(currentState, lastReceivedAction));
       }
   }, [lastReceivedAction]);
 
+  // Effect to periodically check player statuses (only the host does this)
   React.useEffect(() => {
       const statusCheckInterval = setInterval(() => {
           const state = gameStateRef.current;
-          if (!state || myPlayerId !== state.hostId) return; // Only host checks statuses
+          if (!state || myPlayerId !== state.hostId) return;
           
           const now = Date.now();
           let needsUpdate = false;
           const updatedPlayers = state.players.map(p => {
-              if (!p.isClaimed || p.isSpectator) return p;
-              const lastSeen = p.lastSeen || 0;
+              if (!p.isClaimed || p.isSpectator || !p.lastSeen) return p;
               let newStatus = p.status;
               
-              if (now - lastSeen > 90000) newStatus = 'disconnected';
-              else if (now - lastSeen > 20000) newStatus = 'away';
+              if (now - p.lastSeen > 90000) newStatus = 'disconnected';
+              else if (now - p.lastSeen > 20000) newStatus = 'away';
               else newStatus = 'online';
 
               if (newStatus !== p.status) needsUpdate = true;
@@ -282,18 +315,22 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
               let newState = { ...state, players: updatedPlayers };
               const currentHost = updatedPlayers.find(p => p.id === state.hostId);
               if (!currentHost || currentHost.status === 'disconnected') {
-                  newState.hostId = findNextHost(updatedPlayers);
+                  const newHostId = findNextHost(updatedPlayers);
+                  if (newHostId !== null) newState.hostId = newHostId;
               }
-              publishState(newState); // Status changes require a full state sync
+              // Status changes require a full state sync
+              publishState(newState);
           }
       }, 5000);
       
       return () => clearInterval(statusCheckInterval);
   }, [myPlayerId, publishState]);
 
+  // Effect to handle initial state creation or full state updates
   React.useEffect(() => {
     if (!lastReceivedState) return;
 
+    // Case 1: We are the first player in an empty room.
     if (lastReceivedState.isInitial) {
       const initialState = createInitialState();
       initialState.players[0] = {
@@ -306,13 +343,14 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
       };
       setMyPlayerId(0);
       initialState.gameMessage = `${playerName} создал(а) игру. Ожидание других игроков...`;
-      publishState(initialState);
+      publishState(initialState); // Publish the very first state
       return;
     }
 
+    // Case 2: We received a full state update from another player.
     const currentState = gameStateRef.current;
     if (currentState && lastReceivedState.version <= currentState.version && lastReceivedState.version !== undefined) {
-      return;
+      return; // Ignore if it's an old state
     }
 
     const myNewData = lastReceivedState.players.find(p => p.sessionId === mySessionId);
@@ -330,89 +368,77 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
 
   }, [lastReceivedState, playerName, mySessionId, publishState]);
 
+  // --- Action Dispatcher ---
+  // This is the function components will call to perform game actions.
   const handleGameAction = (type, payload = {}) => {
-      const action = { type, payload };
-      
-      // Optimistic update
-      setGameState(currentState => applyAction(currentState, { ...action, payload: { ...payload, senderId: mySessionId }}));
-      
-      // Publish action for others
-      publishAction(action);
+      const state = gameStateRef.current;
+      if (!state) return;
+
+      // Optimistic Update: Apply the action to our local state immediately.
+      // We add a synthetic senderId to the payload so the reducer can handle it.
+      const optimisticState = applyAction(state, { type, payload: { ...payload, senderId: myPlayerId }});
+      setGameState(optimisticState);
+
+      // For complex actions, publish the new full state. Otherwise, publish the action.
+      if (type === 'kickPlayer' || type === 'newGame') {
+         publishState(optimisticState);
+      } else {
+         publishAction(type, payload);
+      }
   };
   
-  const handlePlayerRemoval = (playerIdToRemove, wasKicked = false) => {
-    // Player removal is a complex state change, best handled by a full state sync published by the remover
+  // --- Handlers for complex actions that always use full state sync ---
+  const handleLeaveGame = () => {
     const state = gameStateRef.current;
     if (!state) return;
-
-    const playerToRemove = state.players.find(p => p.id === playerIdToRemove);
-    if (!playerToRemove || !playerToRemove.isClaimed) return;
-
-    const totalScore = calculateTotalScore(playerToRemove);
-    const newLeavers = !wasKicked && totalScore > 0 ? { ...state.leavers, [playerToRemove.name]: totalScore } : state.leavers;
     
-    let newPlayersList = state.players.map(p => 
-        p.id === playerIdToRemove ? { ...createInitialState().players[0], id: p.id, name: `Игрок ${p.id + 1}` } : p
-    );
-    
-    // Demote to spectator if kicked
-    const newSpectators = wasKicked 
-      ? [...state.spectators, { name: playerToRemove.name, id: playerToRemove.sessionId }] 
-      : state.spectators;
-
-    const newHostId = findNextHost(newPlayersList);
-    let finalState = { ...state, players: newPlayersList, spectators: newSpectators, hostId: newHostId, leavers: newLeavers };
-
-    const remainingPlayersCount = newPlayersList.filter(p => p.isClaimed && !p.isSpectator).length;
-
-    if (state.isGameStarted && !state.isGameOver && remainingPlayersCount < 2) {
-        finalState.isGameOver = true;
-        finalState.gameMessage = "Недостаточно игроков, игра окончена.";
-    } else if (state.currentPlayerIndex === playerIdToRemove) {
-        const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex -1, newPlayersList);
-        const nextPlayer = newPlayersList[nextPlayerIndex];
-        const baseReset = createInitialState();
-        finalState = { 
-            ...finalState,
-            ...baseReset,
-            players: newPlayersList,
-            hostId: newHostId,
-            spectators: newSpectators,
-            leavers: newLeavers,
-            isGameStarted: true, 
-            canRoll: true,
-            currentPlayerIndex: nextPlayerIndex,
-            gameMessage: `${playerToRemove.name} ${wasKicked ? 'исключен' : 'вышел'}. Ход ${nextPlayer.name}.`,
-            turnStartTime: Date.now()
-        };
-    } else {
-        finalState.gameMessage = `${playerToRemove.name} ${wasKicked ? 'исключен' : 'вышел'}.`;
-    }
-
-    publishState(finalState);
-  };
-
-  const handleLeaveGame = () => {
     if (isSpectator) {
-      // Handled as a full state update for simplicity
-      const state = gameStateRef.current;
-      if (state) publishState({ ...state, spectators: state.spectators.filter(s => s.id !== mySessionId) });
+      const newState = { ...state, spectators: state.spectators.filter(s => s.id !== mySessionId) };
+      publishState(newState);
       return;
     }
+
     if (myPlayerId !== null) {
-      handlePlayerRemoval(myPlayerId, false);
+        const playerToRemove = state.players.find(p => p.id === myPlayerId);
+        if (!playerToRemove || !playerToRemove.isClaimed) return;
+
+        const totalScore = calculateTotalScore(playerToRemove);
+        const newLeavers = totalScore > 0 ? { ...state.leavers, [playerToRemove.name]: totalScore } : state.leavers;
+        
+        let newPlayersList = state.players.map(p => 
+            p.id === myPlayerId ? { ...createInitialState().players[0], id: p.id, name: `Игрок ${p.id + 1}` } : p
+        );
+
+        const newHostId = findNextHost(newPlayersList);
+        let finalState = { ...state, players: newPlayersList, hostId: newHostId, leavers: newLeavers };
+
+        const remainingPlayersCount = newPlayersList.filter(p => p.isClaimed && !p.isSpectator).length;
+
+        if (state.isGameStarted && !state.isGameOver && remainingPlayersCount < 2) {
+            finalState.isGameOver = true;
+            finalState.gameMessage = "Недостаточно игроков, игра окончена.";
+        } else if (state.currentPlayerIndex === myPlayerId) {
+            const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex -1, newPlayersList);
+            const nextPlayer = newPlayersList[nextPlayerIndex];
+            const baseReset = createInitialState();
+            finalState = { 
+                ...finalState, ...baseReset, players: newPlayersList, hostId: newHostId,
+                spectators: state.spectators, leavers: newLeavers, isGameStarted: true, 
+                canRoll: true, currentPlayerIndex: nextPlayerIndex,
+                gameMessage: `${playerToRemove.name} вышел. Ход ${nextPlayer.name}.`,
+                turnStartTime: Date.now()
+            };
+        } else {
+            finalState.gameMessage = `${playerToRemove.name} вышел.`;
+        }
+        publishState(finalState);
     }
-  };
-  
-  const handleKickPlayer = (playerId) => {
-    handlePlayerRemoval(playerId, true);
   };
 
   const handleJoinGame = () => {
-    // Joining is also a significant state change, better to sync full state
     const state = gameStateRef.current;
     if (!state || myPlayerId !== null || isSpectator) return;
-    if (state.joinRequests.some(r => r.sessionId === mySessionId)) return;
+    if (state.joinRequests && state.joinRequests.some(r => r.sessionId === mySessionId)) return;
     
     const availableSlots = state.players.filter(p => !p.isClaimed).length;
     if (availableSlots === 0) {
@@ -422,23 +448,26 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
       }
       return;
     }
-
+    
+    // If game started, player must request to join
     if (state.isGameStarted && !state.isGameOver) {
       const newRequest = { name: playerName, sessionId: mySessionId, timestamp: Date.now() };
       publishState({ ...state, joinRequests: [...(state.joinRequests || []), newRequest], gameMessage: `${playerName} хочет присоединиться.` });
-    } else {
+    } else { // Otherwise, they can join an open slot directly
       const joinIndex = state.players.findIndex(p => !p.isClaimed);
       const restoredScore = state.leavers?.[playerName] || 0;
       const newLeavers = { ...state.leavers };
       if (restoredScore > 0) delete newLeavers[playerName];
+      
       const newPlayers = state.players.map((p, i) => i === joinIndex ? { ...p, name: playerName, isClaimed: true, scores: restoredScore > 0 ? [restoredScore] : [], status: 'online', sessionId: mySessionId, hasEnteredGame: restoredScore > 0, lastSeen: Date.now() } : p);
-      let newHostId = state.hostId === null ? findNextHost(newPlayers) ?? joinIndex : state.hostId;
+      
+      let newHostId = state.hostId === null ? (findNextHost(newPlayers) ?? joinIndex) : state.hostId;
+      
       publishState({ ...state, players: newPlayers, leavers: newLeavers, hostId: newHostId, gameMessage: `${playerName} присоединился.` });
     }
   };
   
   const handleJoinRequest = (requestSessionId, accepted) => {
-    // Also a full state action
     const state = gameStateRef.current;
     if (!state || myPlayerId !== state.hostId) return;
     const request = (state.joinRequests || []).find(r => r.sessionId === requestSessionId);
@@ -456,21 +485,13 @@ const useGameEngine = (lastReceivedState, lastReceivedAction, publishState, publ
             newState = { ...newState, spectators: [...newState.spectators, { name: request.name, id: request.sessionId }], gameMessage: `Для ${request.name} не нашлось места.` };
         }
     } else {
+        // Denied requests become spectators
         newState = { ...newState, spectators: [...(newState.spectators || []), { name: request.name, id: request.sessionId }], gameMessage: `Хост отклонил запрос ${request.name}.` };
     }
     publishState(newState);
   };
-  
-  // Expose the kick action through the main handler
-  const actionHandler = (actionName, payload) => {
-      if (actionName === 'kickPlayer') {
-          handleKickPlayer(payload.playerId);
-      } else {
-          handleGameAction(actionName, payload);
-      }
-  };
 
-  return { gameState, myPlayerId, isSpectator, handleGameAction: actionHandler, handleJoinGame, handleLeaveGame, handleJoinRequest };
+  return { gameState, myPlayerId, isSpectator, handleGameAction, handleJoinGame, handleLeaveGame, handleJoinRequest };
 };
 
 export default useGameEngine;

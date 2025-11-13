@@ -9,19 +9,20 @@ const Game = ({ roomCode, playerName, onExit }) => {
   const mySessionIdRef = React.useRef(sessionStorage.getItem('tysiacha-sessionId') || `sid_${Math.random().toString(36).substr(2, 9)}`);
 
   React.useEffect(() => {
-    // Ensure sessionId is saved for the session
     if (!sessionStorage.getItem('tysiacha-sessionId')) {
       sessionStorage.setItem('tysiacha-sessionId', mySessionIdRef.current);
     }
   }, []);
 
+  // useMqtt now returns publishAction for sending delta updates
   const { connectionStatus, lastReceivedState, lastReceivedAction, publishState, publishAction } = useMqtt(roomCode, playerName, mySessionIdRef.current);
 
+  // useGameEngine now takes publishAction and lastReceivedAction
   const {
     gameState,
     myPlayerId,
     isSpectator,
-    handleGameAction,
+    handleGameAction, // This function now handles optimistic updates and publishing actions
     handleJoinGame,
     handleLeaveGame: engineHandleLeave,
     handleJoinRequest,
@@ -42,7 +43,6 @@ const Game = ({ roomCode, playerName, onExit }) => {
     };
   }, [playerName]);
   
-  // This effect ensures the session is saved when a player ID is assigned
   React.useEffect(() => {
     if (myPlayerId !== null) {
         const sessionData = { roomCode, playerName, myPlayerId };
@@ -54,7 +54,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
   }, [myPlayerId, roomCode, playerName, isSpectator]);
 
   const handleLeaveGame = () => {
-    engineHandleLeave();
+    engineHandleLeave(); // This now uses publishState for the leave event
     onExit();
   };
 
@@ -65,6 +65,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
   const handleConfirmKick = () => {
     if (kickConfirmState.player) {
+      // Dispatch the action. The engine will handle the state change and publish it.
       handleGameAction('kickPlayer', { playerId: kickConfirmState.player.id });
     }
     setKickConfirmState({ isOpen: false, player: null });
@@ -182,7 +183,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     onJoinRequest: handleJoinRequest,
     onToggleDieSelection: (index) => handleGameAction('toggleDieSelection', { index }),
     onDragStart: handleDragStart,
-    onDrop: onDrop,
+    onDrop: handleDrop,
     onDieDoubleClick: handleDieDoubleClick,
     onInitiateKick: handleInitiateKick,
     onConfirmKick: handleConfirmKick,
