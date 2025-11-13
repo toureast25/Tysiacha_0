@@ -101,7 +101,7 @@ const useMqtt = (roomCode, playerName, mySessionId) => {
         reconnectTimeoutRef.current = setTimeout(connect, 3000);
       }
     };
-  }, [roomCode, mySessionId]);
+  }, [roomCode, mySessionId, sendMessage]);
 
   React.useEffect(() => {
     connect();

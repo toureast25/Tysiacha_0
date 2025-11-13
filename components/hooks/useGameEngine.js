@@ -430,7 +430,7 @@ const useGameEngine = (playerName, mySessionId, comms) => {
     } else {
         clearTimeout(syncRequestTimerRef.current);
     }
-  }, [actionBuffer, setActionBuffer, setIsLocked, resetSyncTimer]);
+  }, [actionBuffer, resetSyncTimer]);
 
   React.useEffect(() => {
     if (!lastReceivedAction) return;
@@ -532,7 +532,7 @@ const useGameEngine = (playerName, mySessionId, comms) => {
             playerCount: playerCount,
         });
     }
-  }, [isHost, lastLobbyPing, sendMessage]);
+  }, [isHost, lastLobbyPing, sendMessage, gameState]);
 
 
   const requestGameAction = (type, payload = {}) => {
