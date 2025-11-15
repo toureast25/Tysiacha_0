@@ -1,4 +1,4 @@
-// 
+
 import React from 'react';
 
 export const DiceIcon = ({ value, isSelected, onClick, onDragStart, onDoubleClick }) => {

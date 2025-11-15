@@ -1,4 +1,4 @@
-// 
+
 // Утилиты игровой логики
 export const analyzeDice = (dice) => {
     const scoringGroups = [];
@@ -137,7 +137,7 @@ export const createInitialState = () => {
     leavers: {}, // Track scores of players who left
     joinRequests: [], // Track join requests for host approval
     currentPlayerIndex: 0,
-    hostId: null, // No host initially
+    hostId: 0, // Player 0 is the initial host
     diceOnBoard: [],
     keptDiceThisTurn: [],
     diceKeptFromThisRoll: [],
@@ -157,11 +157,18 @@ export const createInitialState = () => {
 };
 
 export const findNextHost = (players) => {
-    // Эта логика должна быть абсолютно детерминированной:
-    // Новый хост - это всегда активный игрок с наименьшим ID.
-    const candidates = players
-      .filter(p => p.isClaimed && !p.isSpectator)
-      .sort((a, b) => a.id - b.id);
-      
-    return candidates.length > 0 ? candidates[0].id : null;
+    const candidates = players.filter(p => p.isClaimed && !p.isSpectator).sort((a, b) => a.id - b.id);
+    if (candidates.length === 0) return null;
+
+    // Приоритет №1: Ищем 'online' игрока
+    const onlinePlayer = candidates.find(p => p.status === 'online');
+    if (onlinePlayer) return onlinePlayer.id;
+    
+    // Приоритет №2: Если нет 'online', ищем 'away' игрока
+    const awayPlayer = candidates.find(p => p.status === 'away');
+    if (awayPlayer) return awayPlayer.id;
+    
+    // Приоритет №3: В крайнем случае, выбираем первого кандидата в списке, независимо от статуса.
+    // Это гарантирует, что хост будет всегда, если в игре есть хотя бы один заявленный игрок.
+    return candidates[0].id;
 };

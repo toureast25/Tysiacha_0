@@ -1,4 +1,4 @@
-// 
+
 import React from 'react';
 import GameUI from './GameUI.js';
 import useMqtt from './hooks/useMqtt.js';
@@ -9,22 +9,23 @@ const Game = ({ roomCode, playerName, onExit }) => {
   const mySessionIdRef = React.useRef(sessionStorage.getItem('tysiacha-sessionId') || `sid_${Math.random().toString(36).substr(2, 9)}`);
 
   React.useEffect(() => {
+    // Ensure sessionId is saved for the session
     if (!sessionStorage.getItem('tysiacha-sessionId')) {
       sessionStorage.setItem('tysiacha-sessionId', mySessionIdRef.current);
     }
   }, []);
 
-  const comms = useMqtt(roomCode, playerName, mySessionIdRef.current);
+  const { connectionStatus, lastReceivedState, publishState } = useMqtt(roomCode, playerName, mySessionIdRef.current);
 
   const {
     gameState,
     myPlayerId,
     isSpectator,
-    isLocked, // Получаем состояние блокировки
-    requestGameAction,
+    handleGameAction,
     handleJoinGame,
     handleLeaveGame: engineHandleLeave,
-  } = useGameEngine(playerName, mySessionIdRef.current, comms);
+    handleJoinRequest,
+  } = useGameEngine(lastReceivedState, publishState, playerName, mySessionIdRef.current);
 
   const [isScoreboardExpanded, setIsScoreboardExpanded] = React.useState(false);
   const [isSpectatorsModalOpen, setIsSpectatorsModalOpen] = React.useState(false);
@@ -41,6 +42,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
     };
   }, [playerName]);
   
+  // This effect ensures the session is saved when a player ID is assigned
   React.useEffect(() => {
     if (myPlayerId !== null) {
         const sessionData = { roomCode, playerName, myPlayerId };
@@ -52,7 +54,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
   }, [myPlayerId, roomCode, playerName, isSpectator]);
 
   const handleLeaveGame = () => {
-    engineHandleLeave(); 
+    engineHandleLeave();
     onExit();
   };
 
@@ -63,10 +65,7 @@ const Game = ({ roomCode, playerName, onExit }) => {
 
   const handleConfirmKick = () => {
     if (kickConfirmState.player) {
-      requestGameAction('kickPlayer', { 
-          playerId: kickConfirmState.player.id,
-          sessionId: kickConfirmState.player.sessionId 
-      });
+      handleGameAction('kickPlayer', { playerId: kickConfirmState.player.id });
     }
     setKickConfirmState({ isOpen: false, player: null });
   };
@@ -85,11 +84,11 @@ const Game = ({ roomCode, playerName, onExit }) => {
     if (myPlayerId !== gameState.currentPlayerIndex) return;
     const type = e.dataTransfer.getData('text/plain');
     if (type === 'selection' && gameState.canKeep) {
-      requestGameAction('keepDice', { indices: gameState.selectedDiceIndices });
+      handleGameAction('keepDice', { indices: gameState.selectedDiceIndices });
     } else {
       try {
         const indices = JSON.parse(e.dataTransfer.getData('application/json'));
-        if (Array.isArray(indices)) requestGameAction('keepDice', { indices });
+        if (Array.isArray(indices)) handleGameAction('keepDice', { indices });
       } catch (error) { console.error("Drop error:", error); }
     }
   };
@@ -97,19 +96,19 @@ const Game = ({ roomCode, playerName, onExit }) => {
   const handleDieDoubleClick = (index) => {
     if (myPlayerId !== gameState.currentPlayerIndex) return;
     if (gameState.selectedDiceIndices.length > 0 && gameState.selectedDiceIndices.includes(index)) {
-        if(gameState.canKeep) requestGameAction('keepDice', { indices: gameState.selectedDiceIndices });
+        if(gameState.canKeep) handleGameAction('keepDice', { indices: gameState.selectedDiceIndices });
     } else {
-        requestGameAction('keepDice', { indices: [index] });
+        handleGameAction('keepDice', { indices: [index] });
     }
   };
   
-  if (comms.connectionStatus !== 'connected' || !gameState) {
+  if (connectionStatus !== 'connected' || !gameState) {
     return React.createElement('div', { className: "text-center" }, 
       React.createElement('h2', { className: "font-ruslan text-4xl text-title-yellow mb-4" }, 'Подключение...'),
       React.createElement('p', { className: "text-lg" }, 
-        comms.connectionStatus === 'connecting' ? 'Устанавливаем связь с сервером...' : 
-        comms.connectionStatus === 'reconnecting' ? 'Потеряна связь, переподключаемся...' :
-        comms.connectionStatus === 'error' ? 'Ошибка подключения. Попробуйте обновить страницу.' :
+        connectionStatus === 'connecting' ? 'Устанавливаем связь с сервером...' : 
+        connectionStatus === 'reconnecting' ? 'Потеряна связь, переподключаемся...' :
+        connectionStatus === 'error' ? 'Ошибка подключения. Попробуйте обновить страницу.' :
         'Загрузка игровой комнаты...'
       )
     );
@@ -123,16 +122,10 @@ const Game = ({ roomCode, playerName, onExit }) => {
   
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
   const isCurrentPlayerInactive = currentPlayer && (currentPlayer.status === 'away' || currentPlayer.status === 'disconnected');
-  const showSkipButton = isHost && !isMyTurn && isCurrentPlayerInactive && !gameState.isGameOver && (Date.now() - gameState.turnStartTime > 60000);
+  const showSkipButton = !isMyTurn && isCurrentPlayerInactive && !gameState.isGameOver && (Date.now() - gameState.turnStartTime > 60000);
   const canJoin = myPlayerId === null && !isSpectator;
   const availableSlotsForJoin = gameState.players.filter(p => !p.isClaimed && !p.isSpectator).length;
-  
-  // Здесь мы напрямую обрабатываем joinRequests, так как это специфичная логика для хоста
-  const handleJoinRequest = (sessionId, approved) => {
-    requestGameAction('handleJoinRequest', { sessionId, approved });
-  };
   const isAwaitingApproval = myPlayerId === null && gameState.joinRequests && gameState.joinRequests.some(r => r.sessionId === mySessionIdRef.current);
-
 
   let displayMessage = gameState.gameMessage;
   const myBarrelStatus = isMyTurn && currentPlayer ? getPlayerBarrelStatus(currentPlayer) : null;
@@ -175,20 +168,19 @@ const Game = ({ roomCode, playerName, onExit }) => {
     availableSlotsForJoin,
     currentPlayer,
     kickConfirmState,
-    isLocked, // Передаем состояние блокировки в UI
     onLeaveGame: handleLeaveGame,
     onSetShowRules: setShowRules,
     onSetIsSpectatorsModalOpen: setIsSpectatorsModalOpen,
     onSetIsScoreboardExpanded: setIsScoreboardExpanded,
     onSetIsDragOver: setIsDragOver,
-    onRollDice: () => requestGameAction('rollDice'),
-    onBankScore: () => requestGameAction('bankScore'),
-    onSkipTurn: () => requestGameAction('skipTurn'),
-    onNewGame: () => requestGameAction('newGame'),
-    onStartOfficialGame: () => requestGameAction('startOfficialGame'),
+    onRollDice: () => handleGameAction('rollDice'),
+    onBankScore: () => handleGameAction('bankScore'),
+    onSkipTurn: () => handleGameAction('skipTurn'),
+    onNewGame: () => handleGameAction('newGame'),
+    onStartOfficialGame: () => handleGameAction('startOfficialGame'),
     onJoinGame: handleJoinGame,
     onJoinRequest: handleJoinRequest,
-    onToggleDieSelection: (index) => requestGameAction('toggleDieSelection', { index }),
+    onToggleDieSelection: (index) => handleGameAction('toggleDieSelection', { index }),
     onDragStart: handleDragStart,
     onDrop: handleDrop,
     onDieDoubleClick: handleDieDoubleClick,

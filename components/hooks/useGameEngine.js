@@ -9,552 +9,457 @@ import {
   findNextHost,
 } from '../../utils/gameLogic.js';
 
-// ====================================================================================
-// РЕДЬЮСЕР, ИСПОЛНЯЕМЫЙ НА ВСЕХ КЛИЕНТАХ
-// ====================================================================================
-const gameReducer = (state, action) => {
-    if (!state || !action || !action.type) return state;
-    const { type, payload } = action;
-
-    const updateState = (newState) => ({ ...newState, actionSequence: action.sequence ?? newState.actionSequence });
-
-    switch (type) {
-        case 'SET_FULL_STATE':
-            return { ...payload, actionSequence: payload.actionSequence };
-
-        case 'PLAYER_JOINED': {
-            const { joinIndex, player, newHostId, message } = payload;
-            const newPlayers = state.players.map((p, i) => i === joinIndex ? player : p);
-            return updateState({ ...state, players: newPlayers, hostId: newHostId, gameMessage: message });
-        }
-        
-        case 'JOIN_REQUEST_HANDLED': {
-             return updateState({ ...state, joinRequests: state.joinRequests.filter(r => r.sessionId !== payload.sessionId) });
-        }
-
-        case 'PLAYER_LEFT': {
-            const { playerIndex, newPlayersList, newHostId, finalStateChanges, message } = payload;
-            return updateState({ ...state, ...finalStateChanges, players: newPlayersList, hostId: newHostId, gameMessage: message });
-        }
-        case 'SPECTATOR_JOINED': {
-            const { spectator, message } = payload;
-            return updateState({ ...state, spectators: [...state.spectators, spectator], gameMessage: message });
-        }
-        case 'SPECTATOR_LEFT': {
-            return updateState({ ...state, spectators: state.spectators.filter(s => s.id !== payload.sessionId) });
-        }
-        case 'GAME_STARTED': {
-            return updateState({ ...state, isGameStarted: true, canRoll: true, gameMessage: payload.message, turnStartTime: Date.now() });
-        }
-        case 'NEW_GAME_CREATED': {
-            return updateState({ ...createInitialState(), ...payload });
-        }
-        case 'DICE_ROLLED': {
-            const { newDice, isHotDiceRoll } = payload;
-            return updateState({ ...state, diceOnBoard: newDice, keptDiceThisTurn: isHotDiceRoll ? [] : state.keptDiceThisTurn, diceKeptFromThisRoll: [], scoreFromPreviousRolls: state.currentTurnScore, gameMessage: `${state.players[state.currentPlayerIndex].name} бросает...`, canRoll: false, canBank: true, selectedDiceIndices: [], canKeep: false, potentialScore: 0 });
-        }
-        case 'DICE_KEPT': {
-            const { newTurnScore, scoreAdded, newKeptDiceThisTurn, newDiceOnBoard, isHotDice, combinedDiceAfterKeep } = payload;
-            return updateState({
-                ...state,
-                currentTurnScore: newTurnScore,
-                keptDiceThisTurn: newKeptDiceThisTurn,
-                diceKeptFromThisRoll: isHotDice ? [] : combinedDiceAfterKeep,
-                diceOnBoard: newDiceOnBoard,
-                gameMessage: `+${scoreAdded}! Очки за ход: ${newTurnScore}. ${isHotDice ? 'Все кости сыграли!' : 'Бросайте снова или запишите.'}`,
-                canRoll: true,
-                canBank: true,
-                selectedDiceIndices: [],
-                canKeep: false,
-                potentialScore: 0
-            });
-        }
-        case 'TURN_CHANGED': {
-            const { nextPlayerIndex, newPlayers, message } = payload;
-            const newState = { ...createInitialState(), players: newPlayers, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, currentPlayerIndex: nextPlayerIndex, diceOnBoard: payload.diceForBolt || [], gameMessage: message, turnStartTime: Date.now(), canRoll: true, joinRequests: state.joinRequests };
-            return { ...newState, actionSequence: payload.actionSequence };
-        }
-        case 'GAME_OVER': {
-             const newState = { ...createInitialState(), players: payload.players, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameOver: true, gameMessage: payload.message, joinRequests: state.joinRequests };
-             return { ...newState, actionSequence: payload.actionSequence };
-        }
-        case 'UPDATE_PLAYER_STATUS': {
-            const { updatedPlayers, newHostId } = payload;
-            return { ...state, players: updatedPlayers, hostId: newHostId ?? state.hostId };
-        }
-        case 'TOGGLE_DIE_SELECTION_LOCAL': {
-            if (state.isGameOver || state.diceOnBoard.length === 0) return state;
-            const { index } = payload;
-            const newSelectedIndices = state.selectedDiceIndices.includes(index)
-                ? state.selectedDiceIndices.filter(i => i !== index)
-                : [...state.selectedDiceIndices, index];
-            const selectedValues = newSelectedIndices.map(i => state.diceOnBoard[i]);
-            let validation = validateSelection(selectedValues);
-            if (!validation.isValid && selectedValues.length > 0) {
-                const combinedValidation = validateSelection([...state.diceKeptFromThisRoll, ...selectedValues]);
-                if (combinedValidation.isValid) {
-                    validation = { isValid: true, score: combinedValidation.score - validateSelection(state.diceKeptFromThisRoll).score };
-                }
-            }
-            return {
-                ...state,
-                selectedDiceIndices: newSelectedIndices,
-                canKeep: validation.isValid,
-                potentialScore: validation.score > 0 ? validation.score : 0,
-                gameMessage: validation.isValid ? `Выбрано +${validation.score}.` : `Выберите корректную комбинацию.`
-            };
-        }
-        default:
-            return state;
-    }
-};
-
-
-// ====================================================================================
-// ЛОГИКА, ИСПОЛНЯЕМАЯ ТОЛЬКО НА ХОСТЕ
-// ====================================================================================
-const hostActionHandler = (state, action) => {
-    if (!state || !action || !action.type) return [];
-    const { type, payload, senderId } = action;
-    const player = state.players.find(p => p.sessionId === senderId);
-    const playerIndex = player ? player.id : -1;
-    
-    const isCurrentPlayerAction = ['rollDice', 'keepDice', 'bankScore'].includes(type);
-    if (isCurrentPlayerAction && playerIndex !== state.currentPlayerIndex) {
-        return [];
-    }
-    
-    const findNextActivePlayer = (startIndex, players) => {
-        let nextIndex = (startIndex + 1) % players.length;
-        while (nextIndex !== startIndex) {
-            if (players[nextIndex].isClaimed && !players[nextIndex].isSpectator) return nextIndex;
-            nextIndex = (nextIndex + 1) % players.length;
-        }
-        const firstActive = players.findIndex(p => p.isClaimed && !p.isSpectator);
-        return firstActive !== -1 ? firstActive : startIndex;
-    };
-    
-    let orders = [];
-
-    switch (type) {
-        case 'joinGame': {
-            const { name, sessionId } = payload;
-            if (state.players.some(p => p.sessionId === sessionId) || state.spectators.some(s => s.id === sessionId)) return [];
-
-            if (state.isGameStarted) {
-                // Если игра идет, добавляем в запросы на подтверждение
-                const newJoinRequests = [...(state.joinRequests || []), { name, sessionId }];
-                // Это локальное изменение для хоста, отправляем только обновление state
-                 return [{ type: 'LOCAL_STATE_UPDATE', payload: { joinRequests: newJoinRequests } }];
-            }
-
-            const joinIndex = state.players.findIndex(p => !p.isClaimed);
-            if (joinIndex === -1) {
-                orders.push({ type: 'SPECTATOR_JOINED', payload: { spectator: { name, id: sessionId }, message: `${name} присоединился как зритель.` } });
-                break;
-            }
-            
-            const newPlayer = { ...state.players[joinIndex], name, isClaimed: true, status: 'online', sessionId, scores: [], hasEnteredGame: false, barrelBolts: 0, lastSeen: Date.now() };
-            const newPlayersList = state.players.map((p, i) => i === joinIndex ? newPlayer : p);
-            const newHostId = state.hostId === null ? findNextHost(newPlayersList) : state.hostId;
-            
-            orders.push({ type: 'PLAYER_JOINED', payload: { joinIndex, player: newPlayer, newHostId, message: `${name} присоединился.` } });
-            break;
-        }
-        
-         case 'handleJoinRequest': {
-            if (senderId !== state.players[state.hostId]?.sessionId) return [];
-            const { sessionId, approved } = payload;
-            const request = state.joinRequests.find(r => r.sessionId === sessionId);
-            if (!request) return [];
-
-            orders.push({ type: 'JOIN_REQUEST_HANDLED', payload: { sessionId } });
-
-            if (approved) {
-                const joinIndex = state.players.findIndex(p => !p.isClaimed);
-                if (joinIndex !== -1) {
-                    const newPlayer = { ...state.players[joinIndex], name: request.name, isClaimed: true, status: 'online', sessionId, scores: [], hasEnteredGame: false, barrelBolts: 0, lastSeen: Date.now() };
-                    orders.push({ type: 'PLAYER_JOINED', payload: { joinIndex, player: newPlayer, newHostId: state.hostId, message: `${request.name} присоединился.` } });
-                } else {
-                    orders.push({ type: 'SPECTATOR_JOINED', payload: { spectator: { name: request.name, id: sessionId }, message: `${request.name} присоединился как зритель.` } });
-                }
-            }
-            break;
-        }
-
-        case 'leaveGame': {
-            const { sessionId } = payload;
-            if (state.spectators.some(s => s.id === sessionId)) {
-                orders.push({ type: 'SPECTATOR_LEFT', payload: { sessionId } });
-                break;
-            }
-
-            const pIndex = state.players.findIndex(p => p.sessionId === sessionId);
-            if (pIndex === -1 || !state.players[pIndex].isClaimed) return [];
-            
-            const playerToRemove = state.players[pIndex];
-            let newPlayersList = state.players.map(p => p.id === pIndex ? { ...createInitialState().players[0], id: p.id, name: `Игрок ${p.id + 1}` } : p);
-            const newHostId = findNextHost(newPlayersList);
-            let finalStateChanges = {};
-            let message = `${playerToRemove.name} вышел.`;
-            
-            const remainingPlayersCount = newPlayersList.filter(p => p.isClaimed && !p.isSpectator).length;
-            if (state.isGameStarted && !state.isGameOver && remainingPlayersCount < 2) {
-                finalStateChanges = { isGameOver: true };
-                message = "Недостаточно игроков, игра окончена.";
-                orders.push({ type: 'PLAYER_LEFT', payload: { playerIndex: pIndex, newPlayersList, newHostId, finalStateChanges, message } });
-            } else if (state.currentPlayerIndex === pIndex) {
-                const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex - 1, newPlayersList);
-                const turnChangePayload = { nextPlayerIndex, newPlayers: newPlayersList, message: `${playerToRemove.name} вышел. Ход ${newPlayersList[nextPlayerIndex].name}.`, actionSequence: state.actionSequence + 1 };
-                orders.push({ type: 'TURN_CHANGED', payload: turnChangePayload });
-            } else {
-                 orders.push({ type: 'PLAYER_LEFT', payload: { playerIndex: pIndex, newPlayersList, newHostId, finalStateChanges, message } });
-            }
-            break;
-        }
-        
-        case 'startOfficialGame': {
-            if (senderId !== state.players[state.hostId]?.sessionId) return [];
-            orders.push({ type: 'GAME_STARTED', payload: { message: `Игра началась! Ход ${state.players[state.currentPlayerIndex].name}.` } });
-            break;
-        }
-
-        case 'rollDice': {
-            if (!state.canRoll || state.isGameOver || !state.isGameStarted) return [];
-            
-            const isHotDiceRoll = state.keptDiceThisTurn.length >= 5;
-            const diceToRollCount = isHotDiceRoll ? 5 : 5 - state.keptDiceThisTurn.length;
-            const newDice = Array.from({ length: diceToRollCount }, () => Math.floor(Math.random() * 6) + 1);
-
-            const { scoringGroups } = analyzeDice(newDice);
-            if (scoringGroups.length === 0) { // BOLT
-                const currentPlayer = state.players[state.currentPlayerIndex];
-                let updatedPlayer = { ...currentPlayer, scores: [...currentPlayer.scores, '/'] };
-                const barrelStatus = getPlayerBarrelStatus(currentPlayer);
-                if (barrelStatus) {
-                    updatedPlayer.barrelBolts = (updatedPlayer.barrelBolts || 0) + 1;
-                    if (updatedPlayer.barrelBolts >= 3) {
-                        const totalScore = calculateTotalScore(currentPlayer);
-                        updatedPlayer.scores.push((barrelStatus === '200-300' ? 150 : 650) - totalScore);
-                        updatedPlayer.barrelBolts = 0;
-                        updatedPlayer.justResetFromBarrel = true;
-                    }
-                }
-                const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
-                const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
-                const nextPlayer = newPlayers[nextPlayerIndex];
-                let gameMessage = `${currentPlayer.name} получает болт! Ход ${nextPlayer.name}.`;
-                if (!nextPlayer.hasEnteredGame) gameMessage += ` Ему нужно 50+ для входа.`;
-                
-                const payload = { nextPlayerIndex, newPlayers: newPlayers.map(p => ({ ...p, justResetFromBarrel: false })), message: gameMessage, diceForBolt: newDice, actionSequence: state.actionSequence + 1 };
-                orders.push({ type: 'TURN_CHANGED', payload });
-
-            } else {
-                orders.push({ type: 'DICE_ROLLED', payload: { newDice, isHotDiceRoll } });
-            }
-            break;
-        }
-        
-        case 'keepDice': {
-            const { indices } = payload;
-            if (!indices) return [];
-            const selectedDice = indices.map(i => state.diceOnBoard[i]);
-            
-            const selectionValidation = validateSelection(selectedDice);
-            const combinedDice = [...state.diceKeptFromThisRoll, ...selectedDice];
-            const combinedValidation = validateSelection(combinedDice);
-
-            if (!selectionValidation.isValid && !combinedValidation.isValid) return [];
-            
-            const scoreForThisKeep = combinedValidation.isValid ? combinedValidation.score - validateSelection(state.diceKeptFromThisRoll).score : selectionValidation.score;
-
-            const newTurnScore = state.currentTurnScore + scoreForThisKeep;
-            const newKeptDiceThisTurn = [...state.keptDiceThisTurn, ...selectedDice];
-            const newDiceOnBoard = state.diceOnBoard.filter((_, i) => !indices.includes(i));
-            const isHotDice = newDiceOnBoard.length === 0;
-
-            orders.push({ type: 'DICE_KEPT', payload: { newTurnScore, scoreAdded: scoreForThisKeep, newKeptDiceThisTurn, newDiceOnBoard, isHotDice, combinedDiceAfterKeep: combinedDice } });
-            break;
-        }
-        
-        case 'bankScore': {
-            if (!state.canBank || state.isGameOver) return [];
-            
-            const finalTurnScore = state.currentTurnScore + state.potentialScore;
-            const currentPlayer = state.players[state.currentPlayerIndex];
-            
-            const createBoltTurn = (playerForBolt, barrelStatus, customMsg) => {
-                let updatedPlayer = { ...playerForBolt, scores: [...playerForBolt.scores, '/'] };
-                if (barrelStatus) {
-                  updatedPlayer.barrelBolts = (updatedPlayer.barrelBolts || 0) + 1;
-                  if (updatedPlayer.barrelBolts >= 3) {
-                    const totalScore = calculateTotalScore(playerForBolt);
-                    updatedPlayer.scores.push((barrelStatus === '200-300' ? 150 : 650) - totalScore);
-                    updatedPlayer.barrelBolts = 0;
-                    updatedPlayer.justResetFromBarrel = true;
-                  }
-                }
-                const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
-                const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
-                const nextPlayer = newPlayers[nextIdx];
-                let msg = customMsg || `${playerForBolt.name} получает болт. Ход ${nextPlayer.name}.`;
-                if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
-                return [{ type: 'TURN_CHANGED', payload: { nextPlayerIndex: nextIdx, newPlayers: newPlayers.map(p => ({...p, justResetFromBarrel: false})), message: msg, actionSequence: state.actionSequence + 1 } }];
-            };
-
-            if (finalTurnScore === 0) { orders = createBoltTurn(currentPlayer); break; }
-            if (!currentPlayer.hasEnteredGame && finalTurnScore < 50) {
-                const msg = `${currentPlayer.name} не набрал 50 для входа. Болт!`;
-                orders = createBoltTurn(currentPlayer, null, msg);
-                break;
-            }
-
-            const barrelStatus = getPlayerBarrelStatus(currentPlayer);
-            const totalBefore = calculateTotalScore(currentPlayer);
-            const failedBarrel = (barrelStatus === '200-300' && totalBefore + finalTurnScore < 300) || (barrelStatus === '700-800' && totalBefore + finalTurnScore < 800);
-            if (failedBarrel) { orders = createBoltTurn(currentPlayer, barrelStatus); break; }
-            
-            let playersAfterTurn = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, finalTurnScore], hasEnteredGame: true, barrelBolts: 0 } : p);
-            const newTotal = calculateTotalScore(playersAfterTurn[state.currentPlayerIndex]);
-            const newBarrel = (newTotal >= 200 && newTotal < 300) ? '200-300' : (newTotal >= 700 && newTotal < 800) ? '700-800' : null;
-            let penaltyMsgs = [];
-
-            let playersWithPenalties = playersAfterTurn.map((p, i) => {
-                if (i === state.currentPlayerIndex || !p.isClaimed || p.justResetFromBarrel) return p;
-                const oldTotal = calculateTotalScore(state.players[i]);
-                const otherBarrel = getPlayerBarrelStatus(state.players[i]);
-                if (newBarrel && otherBarrel === newBarrel) {
-                    penaltyMsgs.push(`${p.name} сбит с бочки.`);
-                    return { ...p, scores: [...p.scores, (newBarrel === '200-300' ? 150 : 650) - oldTotal] };
-                }
-                if (totalBefore < oldTotal && newTotal >= oldTotal && oldTotal >= 100) {
-                    const scoreAfterPenalty = oldTotal - 50;
-                    const wouldLandOnBarrel = (scoreAfterPenalty >= 200 && scoreAfterPenalty < 300) || (scoreAfterPenalty >= 700 && scoreAfterPenalty < 800);
-                    if (!wouldLandOnBarrel) {
-                        penaltyMsgs.push(`${p.name} получает штраф -50.`);
-                        return { ...p, scores: [...p.scores, -50] };
-                    }
-                }
-                return p;
-            });
-            
-            if (newTotal >= 1000) {
-                const payload = { players: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), message: `${currentPlayer.name} победил, набрав ${newTotal}!`, actionSequence: state.actionSequence + 1 };
-                orders.push({ type: 'GAME_OVER', payload });
-                break;
-            }
-
-            const nextIdx = findNextActivePlayer(state.currentPlayerIndex, playersWithPenalties);
-            const nextPlayer = playersWithPenalties[nextIdx];
-            let msg = `${currentPlayer.name} записал ${finalTurnScore}. ${penaltyMsgs.join(' ')} Ход ${nextPlayer.name}.`;
-            if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
-            else if (getPlayerBarrelStatus(nextPlayer)) msg += ` Он(а) на бочке.`;
-            
-            const payload = { nextPlayerIndex: nextIdx, newPlayers: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), message: msg, actionSequence: state.actionSequence + 1 };
-            orders.push({ type: 'TURN_CHANGED', payload });
-            break;
-        }
-
-        default:
-            return [];
-    }
-    return orders;
-};
-
-
-const useGameEngine = (playerName, mySessionId, comms) => {
-  const { 
-    lastReceivedState, 
-    lastReceivedAction, 
-    lastReceivedSyncRequest, 
-    lastLobbyPing, 
-    publishState, 
-    publishAction, 
-    requestStateSync,
-    sendMessage 
-  } = comms;
-    
+const useGameEngine = (lastReceivedState, publishState, playerName, mySessionId) => {
   const [gameState, setGameState] = React.useState(null);
-  const [actionBuffer, setActionBuffer] = React.useState({});
-  const [isLocked, setIsLocked] = React.useState(false); // Состояние блокировки UI
-  
+  const [myPlayerId, setMyPlayerId] = React.useState(null);
+  const [isSpectator, setIsSpectator] = React.useState(false);
   const gameStateRef = React.useRef(gameState);
-  const syncRequestTimerRef = React.useRef(null);
-  
+
   React.useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
 
-  const myPlayerId = React.useMemo(() => {
-    return gameState?.players.find(p => p.sessionId === mySessionId)?.id ?? null;
-  }, [gameState, mySessionId]);
+  const findNextActivePlayer = React.useCallback((startIndex, players) => {
+    let nextIndex = (startIndex + 1) % players.length;
+    while (nextIndex !== startIndex) {
+        if (players[nextIndex].isClaimed && !players[nextIndex].isSpectator) {
+            return nextIndex;
+        }
+        nextIndex = (nextIndex + 1) % players.length;
+    }
+    const firstActive = players.findIndex(p => p.isClaimed && !p.isSpectator);
+    return firstActive !== -1 ? firstActive : startIndex;
+  }, []);
 
-  const isSpectator = React.useMemo(() => {
-    return gameState?.spectators.some(s => s.id === mySessionId) ?? false;
-  }, [gameState, mySessionId]);
+  const updateAllPlayerStatuses = React.useCallback((currentPlayers) => {
+    const now = Date.now();
+    let needsUpdate = false;
+    const updatedPlayers = currentPlayers.map(p => {
+        const playerCopy = {...p};
+        if (!playerCopy.isClaimed || playerCopy.isSpectator) return playerCopy;
 
-  const isHost = gameState && myPlayerId !== null && myPlayerId === gameState.hostId;
+        const lastSeen = playerCopy.lastSeen || 0;
+        let newStatus = playerCopy.status;
+        
+        if (lastSeen > 0) {
+            if (now - lastSeen > 90000) newStatus = 'disconnected';
+            else if (now - lastSeen > 20000) newStatus = 'away';
+            else newStatus = 'online';
+        } else if (playerCopy.status !== 'offline') {
+            newStatus = 'offline';
+        }
+
+        if (newStatus !== playerCopy.status) {
+            needsUpdate = true;
+        }
+        playerCopy.status = newStatus;
+        return playerCopy;
+    });
+    return { updatedPlayers, needsUpdate };
+  }, []);
   
-  const resetSyncTimer = React.useCallback(() => {
-      clearTimeout(syncRequestTimerRef.current);
-      syncRequestTimerRef.current = setTimeout(() => {
-          console.warn(`[Sync] Waited too long for sequence #${(gameStateRef.current?.actionSequence || 0) + 1}. Requesting full sync.`);
-          requestStateSync();
-          setIsLocked(true); // Блокируем UI пока ждем синхронизацию
-      }, 5000);
-  }, [requestStateSync]);
-
-  const processActionQueue = React.useCallback((state) => {
-    let currentState = state;
-    let nextSequence = (currentState?.actionSequence || 0) + 1;
-    let processed = false;
-    
-    const bufferCopy = {...actionBuffer};
-
-    while (bufferCopy[nextSequence]) {
-        const actionToApply = bufferCopy[nextSequence];
-        currentState = gameReducer(currentState, actionToApply);
-        delete bufferCopy[nextSequence];
-        nextSequence++;
-        processed = true;
-    }
-    
-    if (processed) {
-        setGameState(currentState);
-        setActionBuffer(bufferCopy);
-        setIsLocked(false); // Снимаем блокировку после применения действия
-    }
-
-    if (Object.keys(bufferCopy).length > 0) {
-        resetSyncTimer();
-    } else {
-        clearTimeout(syncRequestTimerRef.current);
-    }
-  }, [actionBuffer, resetSyncTimer]);
-
   React.useEffect(() => {
-    if (!lastReceivedAction) return;
+      const statusCheckInterval = setInterval(() => {
+          const state = gameStateRef.current;
+          if (!state || isSpectator || myPlayerId === null) return;
+          
+          const { updatedPlayers, needsUpdate } = updateAllPlayerStatuses(state.players);
+          if (needsUpdate) {
+              let newState = { ...state, players: updatedPlayers };
+              const currentHost = state.hostId !== null ? updatedPlayers.find(p => p.id === state.hostId) : null;
+              const isHostInvalid = !currentHost || !currentHost.isClaimed || currentHost.isSpectator || (currentHost.status !== 'online' && currentHost.status !== 'away');
 
-    if (lastReceivedAction.type === 'presenceUpdate') {
-      const playerIdx = gameStateRef.current?.players.findIndex(p => p.sessionId === lastReceivedAction.payload.senderId);
-      if (playerIdx !== -1 && gameStateRef.current.players[playerIdx].isClaimed) {
-          setGameState(prevState => {
-              if(!prevState) return null;
-              const updatedPlayers = [...prevState.players];
-              updatedPlayers[playerIdx] = { ...updatedPlayers[playerIdx], lastSeen: Date.now(), status: 'online' };
-              const newHostId = findNextHost(updatedPlayers);
-              return { ...prevState, players: updatedPlayers, hostId: newHostId };
-          });
-      }
-      return;
-    }
-
-    if (!gameStateRef.current || !('sequence' in lastReceivedAction)) return;
-    
-    const currentSequence = gameStateRef.current.actionSequence || 0;
-    const receivedSequence = lastReceivedAction.sequence;
-
-    if (receivedSequence <= currentSequence) return;
-
-    const newBuffer = { ...actionBuffer, [receivedSequence]: lastReceivedAction };
-    setActionBuffer(newBuffer);
-
-    if (receivedSequence === currentSequence + 1) {
-        clearTimeout(syncRequestTimerRef.current);
-        processActionQueue(gameStateRef.current);
-    } else {
-        resetSyncTimer();
-    }
-
-  }, [lastReceivedAction, processActionQueue, actionBuffer, resetSyncTimer]);
-
-  React.useEffect(() => {
-      if (lastReceivedAction && isHost) {
-          let orders = hostActionHandler(gameStateRef.current, lastReceivedAction);
-          if (orders.length > 0) {
-              if(orders[0].type === 'LOCAL_STATE_UPDATE') {
-                  setGameState(prevState => ({...prevState, ...orders[0].payload}));
-              } else {
-                  orders.forEach((order, index) => {
-                      const sequence = (gameStateRef.current.actionSequence || 0) + 1 + index;
-                      publishAction(order.type, order.payload, sequence);
-                  });
+              if (isHostInvalid) {
+                  newState.hostId = findNextHost(updatedPlayers);
               }
+              // Отправляем полное состояние, так как статус влияет на логику хоста
+              publishState(newState);
           }
-      }
-  }, [lastReceivedAction, isHost, publishAction]);
+      }, 5000);
+      
+      return () => clearInterval(statusCheckInterval);
+  }, [isSpectator, myPlayerId, publishState, updateAllPlayerStatuses]);
+
 
   React.useEffect(() => {
     if (!lastReceivedState) return;
-    
+
     if (lastReceivedState.isInitial) {
       const initialState = createInitialState();
-      initialState.actionSequence = 0;
-      initialState.players[0] = { ...initialState.players[0], name: playerName, isClaimed: true, status: 'online', sessionId: mySessionId, lastSeen: Date.now() };
-      initialState.hostId = 0;
-      initialState.gameMessage = `${playerName} создал(а) игру. Ожидание...`;
-      const stateToPublish = { ...initialState, version: 1 };
-      setGameState(stateToPublish);
-      publishState(stateToPublish);
+      initialState.players[0] = {
+          ...initialState.players[0],
+          name: playerName,
+          isClaimed: true,
+          status: 'online',
+          sessionId: mySessionId,
+          lastSeen: Date.now(),
+      };
+      setMyPlayerId(0);
+      initialState.gameMessage = `${playerName} создал(а) игру. Ожидание других игроков...`;
+      const stateWithVersion = { ...initialState, version: 1, turnStartTime: Date.now() };
+      publishState(stateWithVersion); // Publish the very first state (full)
       return;
     }
-    
+
+    const currentState = gameStateRef.current;
+    if (currentState && lastReceivedState.version <= currentState.version && lastReceivedState.version !== undefined) {
+      return;
+    }
+
+    const myNewData = lastReceivedState.players.find(p => p.sessionId === mySessionId);
+    const iAmNowASpectator = lastReceivedState.spectators.some(s => s.id === mySessionId);
+
+    if (myNewData) {
+      setMyPlayerId(myNewData.id);
+      setIsSpectator(false);
+    } else if (iAmNowASpectator) {
+      setMyPlayerId(null);
+      setIsSpectator(true);
+    }
+
     setGameState(lastReceivedState);
-    setIsLocked(false); // Снимаем блокировку после полной синхронизации
-    clearTimeout(syncRequestTimerRef.current);
 
-    const newBuffer = {};
-    for (const seq in actionBuffer) {
-        if (parseInt(seq) > lastReceivedState.actionSequence) {
-            newBuffer[seq] = actionBuffer[seq];
-        }
-    }
-    setActionBuffer(newBuffer);
-    if(Object.keys(newBuffer).length > 0) {
-        processActionQueue(lastReceivedState);
-    }
+  }, [lastReceivedState, playerName, mySessionId, publishState]);
 
-  }, [lastReceivedState, playerName, mySessionId, publishState, processActionQueue, actionBuffer]);
-
-  React.useEffect(() => {
-      if (lastReceivedSyncRequest && isHost && gameStateRef.current) {
-          publishState({ ...gameStateRef.current, isFullSync: true });
-      }
-  }, [lastReceivedSyncRequest, isHost, publishState]);
-
-  React.useEffect(() => {
-    if (isHost && lastLobbyPing && gameStateRef.current) {
-        const playerCount = gameStateRef.current.players.filter(p => p.isClaimed && !p.isSpectator).length;
-        const host = gameStateRef.current.players.find(p => p.id === gameStateRef.current.hostId);
-        
-        sendMessage('lobby_pong', {
-            hostName: host ? host.name : 'Неизвестен',
-            playerCount: playerCount,
-        });
-    }
-  }, [isHost, lastLobbyPing, sendMessage, gameState]);
-
-
-  const requestGameAction = (type, payload = {}) => {
-      if (type === 'toggleDieSelection') {
-          if (isLocked) return; // Не позволяем выбирать кости, пока UI заблокирован
-          setGameState(currentState => gameReducer(currentState, {type: 'TOGGLE_DIE_SELECTION_LOCAL', payload}));
-          return;
-      }
-      
-      setIsLocked(true); // Блокируем UI для любого действия, требующего ответа хоста
-      publishAction(type, payload);
+  const performGameAction = (action) => {
+    const currentState = gameStateRef.current;
+    if (!currentState) return;
+    
+    const { updatedPlayers } = updateAllPlayerStatuses(currentState.players);
+    const updatedState = { ...currentState, players: updatedPlayers };
+    
+    action(updatedState);
   };
   
-  const handleJoinGame = () => {
-    requestGameAction('joinGame', { name: playerName, sessionId: mySessionId });
+  const gameActions = {
+    startOfficialGame: (state) => {
+        if (myPlayerId !== state.hostId || state.isGameStarted) return;
+        const claimedPlayerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
+        if (claimedPlayerCount < 2) {
+            publishState({ gameMessage: "Нужно как минимум 2 игрока, чтобы начать." }, true);
+            return;
+        }
+        const firstPlayer = state.players[state.currentPlayerIndex];
+        let gameMessage = `Игра началась! Ход ${firstPlayer.name}.`;
+        if (!firstPlayer.hasEnteredGame) gameMessage += ` Ему нужно 50+ для входа.`;
+        publishState({ ...state, isGameStarted: true, canRoll: true, gameMessage, turnStartTime: Date.now() });
+    },
+    newGame: (state) => {
+        if (myPlayerId !== state.hostId) return;
+        const newPlayers = Array.from({ length: 5 }, (_, index) => {
+            const oldPlayer = state.players.find(p => p && p.id === index);
+            if (oldPlayer && oldPlayer.isClaimed && !oldPlayer.isSpectator) {
+                return {
+                    ...oldPlayer, 
+                    scores: [],
+                    hasEnteredGame: false,
+                    barrelBolts: 0,
+                    justResetFromBarrel: false,
+                };
+            }
+            return { ...createInitialState().players[0], id: index, name: `Игрок ${index + 1}` };
+        });
+        const hostPlayer = newPlayers.find(p => p.id === state.hostId);
+        const gameMessage = newPlayers.filter(p => p.isClaimed && !p.isSpectator).length < 2
+            ? `${hostPlayer.name} создал(а) новую игру. Ожидание...`
+            : `Новая игра! Ожидание начала от хоста.`;
+        publishState({ ...createInitialState(), players: newPlayers, spectators: state.spectators, hostId: state.hostId, currentPlayerIndex: state.hostId, gameMessage, turnStartTime: Date.now() });
+    },
+    rollDice: (state) => {
+        if (!state.canRoll || state.isGameOver || !state.isGameStarted) return;
+        const isHotDiceRoll = state.keptDiceThisTurn.length >= 5;
+        const diceToRollCount = isHotDiceRoll ? 5 : 5 - state.keptDiceThisTurn.length;
+        const newDice = Array.from({ length: diceToRollCount }, () => Math.floor(Math.random() * 6) + 1);
+        const { scoringGroups } = analyzeDice(newDice);
+        if (scoringGroups.reduce((s, g) => s + g.score, 0) === 0) { // BOLT
+            const currentPlayer = state.players[state.currentPlayerIndex];
+            let updatedPlayer = { ...currentPlayer, scores: [...currentPlayer.scores, '/'] };
+            const barrelStatus = getPlayerBarrelStatus(currentPlayer);
+            if (barrelStatus) {
+                updatedPlayer.barrelBolts = (updatedPlayer.barrelBolts || 0) + 1;
+                if (updatedPlayer.barrelBolts >= 3) {
+                    const totalScore = calculateTotalScore(currentPlayer);
+                    updatedPlayer.scores.push((barrelStatus === '200-300' ? 150 : 650) - totalScore);
+                    updatedPlayer.barrelBolts = 0;
+                    updatedPlayer.justResetFromBarrel = true;
+                }
+            }
+            const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
+            const nextPlayerIndex = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
+            const nextPlayer = newPlayers[nextPlayerIndex];
+            let gameMessage = `${currentPlayer.name} получает болт! Ход ${nextPlayer.name}.`;
+            if (!nextPlayer.hasEnteredGame) gameMessage += ` Ему нужно 50+ для входа.`;
+            publishState({ ...createInitialState(), players: newPlayers.map(p => ({ ...p, justResetFromBarrel: false })), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, currentPlayerIndex: nextPlayerIndex, diceOnBoard: newDice, gameMessage, turnStartTime: Date.now(), canRoll: true });
+        } else {
+            publishState({ ...state, diceOnBoard: newDice, keptDiceThisTurn: isHotDiceRoll ? [] : state.keptDiceThisTurn, diceKeptFromThisRoll: [], scoreFromPreviousRolls: state.currentTurnScore, gameMessage: `Ваш бросок. Выберите очковые кости.`, canRoll: false, canBank: true, selectedDiceIndices: [], canKeep: false, potentialScore: 0 });
+        }
+    },
+    toggleDieSelection: (state, { index }) => {
+        if (state.isGameOver || state.diceOnBoard.length === 0) return;
+        const newSelectedIndices = state.selectedDiceIndices.includes(index)
+            ? state.selectedDiceIndices.filter(i => i !== index)
+            : [...state.selectedDiceIndices, index];
+        const selectedValues = newSelectedIndices.map(i => state.diceOnBoard[i]);
+        let validation = validateSelection(selectedValues);
+        if (!validation.isValid && selectedValues.length > 0) {
+            const combinedValidation = validateSelection([...state.diceKeptFromThisRoll, ...selectedValues]);
+            if (combinedValidation.isValid) {
+                validation = { isValid: true, score: combinedValidation.score - validateSelection(state.diceKeptFromThisRoll).score };
+            }
+        }
+        
+        const delta = {
+            selectedDiceIndices: newSelectedIndices,
+            canKeep: validation.isValid,
+            potentialScore: validation.score > 0 ? validation.score : 0,
+            gameMessage: validation.isValid ? `Выбрано +${validation.score}.` : `Выберите корректную комбинацию.`
+        };
+        publishState(delta, true); // Отправляем только дельту
+    },
+    keepDice: (state, { indices }) => {
+        const combinedDice = [...state.diceKeptFromThisRoll, ...indices.map(i => state.diceOnBoard[i])];
+        const validation = validateSelection(combinedDice);
+        if (!validation.isValid) {
+            publishState({ gameMessage: "Неверный выбор." }, true);
+            return;
+        }
+        const newTurnScore = state.scoreFromPreviousRolls + validation.score;
+        const scoreAdded = newTurnScore - state.currentTurnScore;
+        const newKeptDiceThisTurn = [...state.keptDiceThisTurn, ...indices.map(i => state.diceOnBoard[i])];
+        const newDiceOnBoard = state.diceOnBoard.filter((_, i) => !indices.includes(i));
+        const isHotDice = newDiceOnBoard.length === 0;
+
+        const delta = {
+            currentTurnScore: newTurnScore,
+            keptDiceThisTurn: newKeptDiceThisTurn,
+            diceKeptFromThisRoll: isHotDice ? [] : combinedDice,
+            diceOnBoard: newDiceOnBoard,
+            gameMessage: `+${scoreAdded}! Очки за ход: ${newTurnScore}. ${isHotDice ? 'Все кости сыграли!' : 'Бросайте снова или запишите.'}`,
+            canRoll: true,
+            canBank: true,
+            selectedDiceIndices: [],
+            canKeep: false,
+            potentialScore: 0
+        };
+        publishState(delta, true); // Отправляем дельту
+    },
+    bankScore: (state) => {
+        if (!state.canBank || state.isGameOver) return;
+        const selectedValues = state.selectedDiceIndices.map(i => state.diceOnBoard[i]);
+        const validation = validateSelection([...state.diceKeptFromThisRoll, ...selectedValues]);
+        const finalTurnScore = (state.selectedDiceIndices.length > 0 && validation.isValid) 
+            ? state.scoreFromPreviousRolls + validation.score 
+            : state.currentTurnScore + state.potentialScore;
+
+        const currentPlayer = state.players[state.currentPlayerIndex];
+        
+        const getBoltState = (playerForBolt, barrelStatus) => {
+          let updatedPlayer = { ...playerForBolt, scores: [...playerForBolt.scores, '/'] };
+          if (barrelStatus) {
+            updatedPlayer.barrelBolts = (updatedPlayer.barrelBolts || 0) + 1;
+            if (updatedPlayer.barrelBolts >= 3) {
+              const totalScore = calculateTotalScore(playerForBolt);
+              updatedPlayer.scores.push((barrelStatus === '200-300' ? 150 : 650) - totalScore);
+              updatedPlayer.barrelBolts = 0;
+              updatedPlayer.justResetFromBarrel = true;
+            }
+          }
+          const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? updatedPlayer : p);
+          const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
+          const nextPlayer = newPlayers[nextIdx];
+          let msg = `${playerForBolt.name} получает болт. Ход ${nextPlayer.name}.`;
+          if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
+          return { ...createInitialState(), players: newPlayers.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() };
+        };
+
+        if (finalTurnScore === 0) {
+            publishState(getBoltState(currentPlayer));
+            return;
+        }
+
+        if (!currentPlayer.hasEnteredGame && finalTurnScore < 50) {
+            const nextIdx = findNextActivePlayer(state.currentPlayerIndex, state.players);
+            const nextPlayer = state.players[nextIdx];
+            let msg = `${currentPlayer.name} не набрал 50 для входа. Ход ${nextPlayer.name}.`;
+            if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
+            publishState({ ...createInitialState(), players: state.players, spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
+            return;
+        }
+
+        const barrelStatus = getPlayerBarrelStatus(currentPlayer);
+        const totalBefore = calculateTotalScore(currentPlayer);
+        const failedBarrel = (barrelStatus === '200-300' && totalBefore + finalTurnScore < 300) || (barrelStatus === '700-800' && totalBefore + finalTurnScore < 800);
+
+        if (failedBarrel) {
+            publishState(getBoltState(currentPlayer, barrelStatus));
+            return;
+        }
+        
+        let playersAfterTurn = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, finalTurnScore], hasEnteredGame: true, barrelBolts: 0 } : p);
+        const newTotal = calculateTotalScore(playersAfterTurn[state.currentPlayerIndex]);
+        const newBarrel = (newTotal >= 200 && newTotal < 300) ? '200-300' : (newTotal >= 700 && newTotal < 800) ? '700-800' : null;
+        let penaltyMsgs = [];
+
+        let playersWithPenalties = playersAfterTurn.map((p, i) => {
+            if (i === state.currentPlayerIndex || !p.isClaimed) return p;
+            const oldTotal = calculateTotalScore(state.players[i]);
+            const otherBarrel = getPlayerBarrelStatus(state.players[i]);
+            if (newBarrel && otherBarrel === newBarrel) {
+                penaltyMsgs.push(`${p.name} сбит с бочки.`);
+                return { ...p, scores: [...p.scores, (newBarrel === '200-300' ? 150 : 650) - oldTotal] };
+            }
+            if (totalBefore < oldTotal && newTotal >= oldTotal && oldTotal >= 100) {
+                const scoreAfterPenalty = oldTotal - 50;
+                const wouldLandOnBarrel = (scoreAfterPenalty >= 200 && scoreAfterPenalty < 300) || (scoreAfterPenalty >= 700 && scoreAfterPenalty < 800);
+                if (!wouldLandOnBarrel && !p.justResetFromBarrel) {
+                    penaltyMsgs.push(`${p.name} получает штраф -50.`);
+                    return { ...p, scores: [...p.scores, -50] };
+                }
+            }
+            return p;
+        });
+        
+        if (newTotal >= 1000) {
+            publishState({ ...createInitialState(), players: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameOver: true, gameMessage: `${currentPlayer.name} победил, набрав ${newTotal}!` });
+            return;
+        }
+
+        const nextIdx = findNextActivePlayer(state.currentPlayerIndex, playersWithPenalties);
+        const nextPlayer = playersWithPenalties[nextIdx];
+        let msg = `${currentPlayer.name} записал ${finalTurnScore}. ${penaltyMsgs.join(' ')} Ход ${nextPlayer.name}.`;
+        const nextBarrel = getPlayerBarrelStatus(nextPlayer);
+        if (!nextPlayer.hasEnteredGame) msg += ` Ему нужно 50+ для входа.`;
+        else if (nextBarrel) msg += ` Он(а) на бочке.`;
+        publishState({ ...createInitialState(), players: playersWithPenalties.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
+    },
+    skipTurn: (state) => {
+        if(state.isGameOver || myPlayerId === state.currentPlayerIndex) return;
+        const currentPlayer = state.players[state.currentPlayerIndex];
+        if(currentPlayer.status === 'online') return;
+        const newPlayers = state.players.map((p, i) => i === state.currentPlayerIndex ? { ...p, scores: [...p.scores, '/'] } : p);
+        const nextIdx = findNextActivePlayer(state.currentPlayerIndex, newPlayers);
+        const msg = `${currentPlayer.name} пропустил ход. Ход ${newPlayers[nextIdx].name}.`;
+        publishState({ ...createInitialState(), players: newPlayers.map(p => ({...p, justResetFromBarrel: false})), spectators: state.spectators, leavers: state.leavers, hostId: state.hostId, isGameStarted: true, canRoll: true, currentPlayerIndex: nextIdx, gameMessage: msg, turnStartTime: Date.now() });
+    },
+    kickPlayer: (state, { playerId }) => {
+        if (myPlayerId !== state.hostId) return;
+        handlePlayerRemoval(playerId, true);
+    }
+  };
+
+  const handleGameAction = (actionName, payload) => {
+    performGameAction(state => gameActions[actionName](state, payload));
+  };
+  
+  const handlePlayerRemoval = (playerIdToRemove, wasKicked = false) => {
+    performGameAction((state) => {
+      const playerToRemove = state.players.find(p => p.id === playerIdToRemove);
+      if (!playerToRemove || !playerToRemove.isClaimed) return;
+
+      const totalScore = calculateTotalScore(playerToRemove);
+      const newLeavers = !wasKicked && totalScore > 0 ? { ...state.leavers, [playerToRemove.name]: totalScore } : state.leavers;
+      
+      let newPlayers = state.players.filter(p => p.isClaimed && p.id !== playerIdToRemove).map((p, index) => ({ ...p, id: index }));
+      while (newPlayers.length < 5) {
+          newPlayers.push({ ...createInitialState().players[0], id: newPlayers.length, name: `Игрок ${newPlayers.length + 1}` });
+      }
+
+      const newHostId = findNextHost(newPlayers);
+      const gameWasInProgress = !state.isGameOver && state.isGameStarted;
+      let newCurrentPlayerIndex = newHostId !== null ? newHostId : 0;
+      if (gameWasInProgress) {
+          const oldCurrentPlayer = state.players[state.currentPlayerIndex];
+          if (oldCurrentPlayer.id === playerIdToRemove) {
+              newCurrentPlayerIndex = findNextActivePlayer(-1, newPlayers); 
+          } else {
+              const currentPlayerInNewList = newPlayers.find(p => p.sessionId === oldCurrentPlayer.sessionId);
+              newCurrentPlayerIndex = currentPlayerInNewList ? currentPlayerInNewList.id : findNextActivePlayer(-1, newPlayers);
+          }
+      }
+
+      const remainingPlayers = newPlayers.filter(p => p.isClaimed && !p.isSpectator);
+      if (gameWasInProgress && remainingPlayers.length < 2 && state.players.filter(p => p.isClaimed && !p.isSpectator).length >= 2) {
+          publishState({ ...state, players: newPlayers, hostId: newHostId, leavers: newLeavers, isGameOver: true, gameMessage: remainingPlayers.length === 1 ? `${remainingPlayers[0].name} победил, все вышли!` : 'Все вышли.' });
+      } else {
+          let message = `${playerToRemove.name} ${wasKicked ? 'был исключен' : 'вышел'}.`;
+          if (gameWasInProgress && state.players[state.currentPlayerIndex].id === playerIdToRemove) {
+              message += ` Ход ${newPlayers[newCurrentPlayerIndex].name}.`;
+          }
+          let finalState = { ...state, players: newPlayers, hostId: newHostId, leavers: newLeavers, currentPlayerIndex: newCurrentPlayerIndex, gameMessage: message };
+          if (state.players[state.currentPlayerIndex].id === playerIdToRemove && gameWasInProgress) {
+              finalState = { ...finalState, ...createInitialState(), players: newPlayers, hostId: newHostId, leavers: newLeavers, currentPlayerIndex: newCurrentPlayerIndex, gameMessage: message, isGameStarted: true, canRoll: true, turnStartTime: Date.now() };
+          }
+          publishState(finalState);
+      }
+    });
   };
 
   const handleLeaveGame = () => {
-    requestGameAction('leaveGame', { sessionId: mySessionId });
+    if (isSpectator) {
+      const state = gameStateRef.current;
+      if(state) publishState({spectators: state.spectators.filter(s => s.id !== mySessionId)}, true);
+      return;
+    }
+    if (myPlayerId !== null) {
+      handlePlayerRemoval(myPlayerId, false);
+    }
+  };
+
+  const handleJoinGame = () => {
+    performGameAction(state => {
+      if (myPlayerId !== null || isSpectator) return;
+      if (state.joinRequests.some(r => r.sessionId === mySessionId)) return;
+      
+      const availableSlots = state.players.filter(p => !p.isClaimed).length;
+      if (availableSlots === 0) {
+        if (window.confirm("Нет мест. Присоединиться зрителем?")) {
+          const newSpectator = { name: playerName, id: mySessionId };
+          publishState({ spectators: [...state.spectators, newSpectator] }, true);
+          setIsSpectator(true);
+        }
+        return;
+      }
+
+      if (state.isGameStarted && !state.isGameOver) {
+        const newRequest = { name: playerName, sessionId: mySessionId, timestamp: Date.now() };
+        publishState({ joinRequests: [...(state.joinRequests || []), newRequest], gameMessage: `${playerName} хочет присоединиться.` }, true);
+      } else {
+        const joinIndex = state.players.findIndex(p => !p.isClaimed);
+        const restoredScore = state.leavers?.[playerName] || 0;
+        const newLeavers = { ...state.leavers };
+        if (restoredScore > 0) delete newLeavers[playerName];
+        const newPlayers = state.players.map((p, i) => i === joinIndex ? { ...p, name: playerName, isClaimed: true, scores: restoredScore > 0 ? [restoredScore] : [], status: 'online', sessionId: mySessionId, hasEnteredGame: restoredScore > 0, lastSeen: Date.now() } : p);
+        let newHostId = state.hostId === null ? findNextHost(newPlayers) ?? joinIndex : state.hostId;
+        publishState({ ...state, players: newPlayers, leavers: newLeavers, hostId: newHostId, gameMessage: `${playerName} присоединился.` });
+      }
+    });
   };
   
-  return { gameState, myPlayerId, isSpectator, isLocked, requestGameAction, handleJoinGame, handleLeaveGame };
+  const handleJoinRequest = (requestSessionId, accepted) => {
+    performGameAction(state => {
+      if (myPlayerId !== state.hostId) return;
+      const request = (state.joinRequests || []).find(r => r.sessionId === requestSessionId);
+      if (!request) return;
+      
+      const remainingRequests = (state.joinRequests || []).filter(r => r.sessionId !== requestSessionId);
+      let newState = { ...state, joinRequests: remainingRequests };
+
+      if (accepted) {
+          const joinIndex = newState.players.findIndex(p => !p.isClaimed);
+          if (joinIndex !== -1) {
+              const newPlayers = newState.players.map((p, i) => i === joinIndex ? { ...p, name: request.name, isClaimed: true, status: 'online', sessionId: request.sessionId, lastSeen: Date.now() } : p);
+              newState = { ...newState, players: newPlayers, gameMessage: `${request.name} присоединился.` };
+          } else {
+              newState = { ...newState, spectators: [...newState.spectators, { name: request.name, id: request.sessionId }], gameMessage: `Для ${request.name} не нашлось места.` };
+          }
+      } else {
+          newState = { ...newState, spectators: [...(newState.spectators || []), { name: request.name, id: request.sessionId }], gameMessage: `Хост отклонил запрос ${request.name}.` };
+      }
+      publishState(newState);
+    });
+  };
+
+  return { gameState, myPlayerId, isSpectator, handleGameAction, handleJoinGame, handleLeaveGame, handleJoinRequest };
 };
 
 export default useGameEngine;
