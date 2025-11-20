@@ -156,6 +156,25 @@ export const createInitialState = () => {
   };
 };
 
+export const createLocalGameState = (playerCount) => {
+    const state = createInitialState();
+    state.players = state.players.map((p, i) => {
+        if (i < playerCount) {
+            return { 
+                ...p, 
+                isClaimed: true, 
+                status: 'online', 
+                name: `Игрок ${i + 1}` 
+            };
+        }
+        return p;
+    });
+    state.isGameStarted = true;
+    state.canRoll = true;
+    state.gameMessage = 'Локальная игра началась! Ход Игрока 1.';
+    return state;
+};
+
 export const findNextHost = (players) => {
     const candidates = players.filter(p => p.isClaimed && !p.isSpectator).sort((a, b) => a.id - b.id);
     if (candidates.length === 0) return null;

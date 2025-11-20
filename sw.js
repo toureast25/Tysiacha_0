@@ -1,5 +1,5 @@
 
-const CACHE_NAME = 'tysiacha-cache-v1.0.9'; // Increment cache version
+const CACHE_NAME = 'tysiacha-cache-v1.0.15'; // Increment cache version
 const urlsToCache = [
   '.', // Кэшируем корневую директорию (эквивалент '/')
   'index.html',
@@ -8,7 +8,7 @@ const urlsToCache = [
   'index.js',
   'constants.js',
   'utils/gameLogic.js',
-  'utils/mqttUtils.js', // Renamed internally to PeerUtils but file stays
+  'utils/mqttUtils.js', 
   'components/App.js',
   'components/Lobby.js',
   'components/Game.js',

@@ -1,7 +1,7 @@
 
-// --- P2P Configuration ---
-// Мы используем PeerJS для прямого соединения между браузерами (WebRTC).
-// Это исключает ненадежные MQTT брокеры.
-// Хост игры действует как сервер.
+// --- Network Configuration ---
+// Мы используем MQTT через WebSockets для обмена сообщениями.
+// Это обеспечивает надежную доставку сообщений и работу через NAT/Firewall.
+// Хост игры действует как источник правды (state owner).
 
-export const PEER_PREFIX = 'tysiacha-v2-game-'; // Префикс для ID комнат в сети PeerJS
+export const APP_VERSION = '3.0.3';

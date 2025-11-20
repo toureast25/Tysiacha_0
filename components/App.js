@@ -49,8 +49,8 @@ const App = () => {
   }, [tabStatus]);
 
 
-  const handleStartGame = React.useCallback((roomCode, playerName, mode) => {
-    setGameProps({ roomCode, playerName, initialMode: mode });
+  const handleStartGame = React.useCallback((roomCode, playerName, mode, localConfig) => {
+    setGameProps({ roomCode, playerName, initialMode: mode, localConfig });
     setScreen('GAME');
   }, []);
   
@@ -111,7 +111,7 @@ const App = () => {
       case 'PRIMARY':
         switch (screen) {
           case 'GAME':
-            return React.createElement(Game, { key: gameProps.roomCode, ...gameProps, onExit: handleExitGame });
+            return React.createElement(Game, { key: gameProps.roomCode || 'LOCAL', ...gameProps, onExit: handleExitGame });
           case 'LOBBY':
           default:
             return React.createElement(Lobby, { onStartGame: handleStartGame, initialRoomCode: initialRoomCode });

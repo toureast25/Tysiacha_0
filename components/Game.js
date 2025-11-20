@@ -1,9 +1,10 @@
 
 import React from 'react';
 import GameUI from './GameUI.js';
-import { initHostPeer, initClientPeer, connectToHost } from '../utils/mqttUtils.js'; // PeerJS utils
+import { createMqttClient, getRoomTopic } from '../utils/mqttUtils.js';
 import {
   createInitialState,
+  createLocalGameState,
   analyzeDice,
   validateSelection,
   calculateTotalScore,
@@ -292,26 +293,28 @@ const findNextActivePlayer = (startIndex, players) => {
 
 // --- GAME COMPONENT ---
 
-const Game = ({ roomCode, playerName, initialMode, onExit }) => {
-  const [gameState, dispatch] = React.useReducer(gameReducer, null);
+const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
+  const isLocalMode = initialMode === 'local';
+  
+  const initialLocalState = React.useMemo(() => {
+      if (isLocalMode) {
+           return createLocalGameState(localConfig?.playerCount || 2);
+      }
+      return null;
+  }, [isLocalMode, localConfig]);
+  
+  const [gameState, dispatch] = React.useReducer(gameReducer, initialLocalState);
   const [myPlayerId, setMyPlayerId] = React.useState(null);
   const [isSpectator, setIsSpectator] = React.useState(false);
-  const [connectionStatus, setConnectionStatus] = React.useState('connecting'); // connecting, connected, error, error_busy, retrying
-  const [isHost, setIsHost] = React.useState(initialMode === 'create');
-  const [retryCount, setRetryCount] = React.useState(0);
-
+  const [connectionStatus, setConnectionStatus] = React.useState(isLocalMode ? 'connected' : 'connecting'); 
+  const [isHost, setIsHost] = React.useState(initialMode === 'create' || isLocalMode);
+  
   const mySessionIdRef = React.useRef(sessionStorage.getItem('tysiacha-sessionId') || `sid_${Math.random().toString(36).substr(2, 9)}`);
-  const peerRef = React.useRef(null);
-  const connectionsRef = React.useRef([]);
-  const hostConnRef = React.useRef(null);
+  const clientRef = React.useRef(null);
+  const roomTopicRef = React.useRef(getRoomTopic(roomCode || 'LOCAL'));
   const isCleanedUp = React.useRef(false);
   const wakeLockRef = React.useRef(null);
 
-  React.useEffect(() => {
-    sessionStorage.setItem('tysiacha-sessionId', mySessionIdRef.current);
-    return () => { isCleanedUp.current = true; };
-  }, []);
-  
   // --- WAKE LOCK ---
   React.useEffect(() => {
     const requestWakeLock = async () => {
@@ -319,232 +322,180 @@ const Game = ({ roomCode, playerName, initialMode, onExit }) => {
         try {
           const lock = await navigator.wakeLock.request('screen');
           wakeLockRef.current = lock;
-          console.log('Wake Lock active');
-          lock.addEventListener('release', () => {
-              console.log('Wake Lock released');
-          });
-        } catch (err) {
-          console.warn('Wake Lock error:', err);
-        }
+          lock.addEventListener('release', () => {});
+        } catch (err) { console.warn('Wake Lock error:', err); }
       }
     };
-    
     const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible' && (!wakeLockRef.current || wakeLockRef.current.released)) {
-            requestWakeLock();
-        }
+        if (document.visibilityState === 'visible' && (!wakeLockRef.current || wakeLockRef.current.released)) requestWakeLock();
     };
-
     requestWakeLock();
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
     return () => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         if (wakeLockRef.current) wakeLockRef.current.release().catch(() => {});
     };
   }, []);
 
-  // --- HOST SETUP with RETRY ---
-  const initializeHost = (retriesLeft = 5) => {
-    if (peerRef.current) {
-        peerRef.current.destroy();
-        peerRef.current = null;
-    }
+  // --- MQTT SETUP ---
+  React.useEffect(() => {
+      if (isLocalMode) return; // SKIP MQTT FOR LOCAL GAME
 
-    try {
-        const peer = initHostPeer(roomCode);
-        peerRef.current = peer;
+      isCleanedUp.current = false;
+      setConnectionStatus('connecting');
 
-        peer.on('open', (id) => {
-            if (isCleanedUp.current) return;
-            console.log('HOST: Session started with ID', id);
-            setIsHost(true);
-            setConnectionStatus('connected');
-            
-            const savedState = localStorage.getItem(`tysiacha-state-${roomCode}`);
-            let initialState;
-            if (savedState) {
-                try {
-                    initialState = JSON.parse(savedState);
-                } catch (e) { initialState = createInitialState(); }
-            } else {
-                initialState = createInitialState();
-                initialState.hostId = 0;
-                initialState.players[0] = { 
-                    ...initialState.players[0], 
-                    name: playerName, 
-                    isClaimed: true, 
-                    sessionId: mySessionIdRef.current, 
-                    status: 'online' 
-                };
-                initialState.gameMessage = `${playerName} создал(а) игру.`;
-            }
-            dispatch({ type: 'SET_STATE', payload: initialState });
-        });
-
-        peer.on('connection', (conn) => {
-            connectionsRef.current.push(conn);
-            conn.on('open', () => {
-                if (gameState) conn.send({ type: 'SET_STATE', payload: gameState });
-            });
-            conn.on('data', (action) => {
-                if (action.type) dispatch({ ...action, _senderId: conn.metadata?.sessionId });
-            });
-            conn.on('close', () => {
-                connectionsRef.current = connectionsRef.current.filter(c => c !== conn);
-            });
-        });
-
-        peer.on('error', (err) => {
-            console.error('HOST Error:', err);
-            if (err.type === 'unavailable-id') {
-                // The ID is taken. This can happen if the previous session is ghosting on the server.
-                // We need to destroy this instance (which is now invalid) and try again.
-                if (peerRef.current) peerRef.current.destroy();
-
-                if (retriesLeft > 0 && !isCleanedUp.current) {
-                    const delay = 2000; // Wait 2s for server to potentially clear old ID
-                    console.log(`Host ID taken, retrying in ${delay}ms... (${retriesLeft} left)`);
-                    setConnectionStatus('retrying');
-                    
-                    setTimeout(() => {
-                        if (!isCleanedUp.current) initializeHost(retriesLeft - 1);
-                    }, delay);
-                } else {
-                    if (!isCleanedUp.current) setConnectionStatus('error_busy');
-                }
-            } else {
-                if (!isCleanedUp.current && connectionStatus !== 'retrying') setConnectionStatus('error');
-            }
-        });
-    } catch (e) {
-        console.error(e);
-        setConnectionStatus('error');
-    }
-  };
-
-  // --- CLIENT SETUP ---
-  const initializeClient = (retries = 3) => {
-      if (peerRef.current) peerRef.current.destroy();
-      
+      let client;
       try {
-          const peer = initClientPeer();
-          peerRef.current = peer;
-          let connectionTimeout;
+          client = createMqttClient(mySessionIdRef.current);
+          clientRef.current = client;
+      } catch (e) {
+          setConnectionStatus('error');
+          return;
+      }
+      
+      // Timeout safety for connection hanging
+      // Increased to 30s because we might cycle through multiple brokers
+      const connectionTimeout = setTimeout(() => {
+          if (client && !client.connected && !isCleanedUp.current) {
+              console.warn('MQTT Connection Timed Out');
+              setConnectionStatus('error');
+              client.end();
+          }
+      }, 30000); 
 
-          peer.on('open', () => {
-              if (isCleanedUp.current) return;
-              const conn = connectToHost(peer, roomCode, { sessionId: mySessionIdRef.current, name: playerName });
-              hostConnRef.current = conn;
-
-              // Timeout if host doesn't answer
-              connectionTimeout = setTimeout(() => {
-                  if (connectionStatus !== 'connected' && !isCleanedUp.current) {
-                      console.warn('Connection timed out');
-                      setConnectionStatus('error_timeout');
-                      conn.close();
-                  }
-              }, 6000);
-
-              conn.on('open', () => {
-                  clearTimeout(connectionTimeout);
-                  if (isCleanedUp.current) return;
-                  console.log('CLIENT: Connected to Host');
-                  setConnectionStatus('connected');
-                  conn.send({ type: 'PLAYER_JOIN', payload: { playerName, sessionId: mySessionIdRef.current } });
-              });
-
-              conn.on('data', (action) => {
-                  if (action.type === 'SET_STATE') {
-                      dispatch({ type: 'SET_STATE', payload: action.payload });
-                  }
-              });
-
-              conn.on('close', () => {
-                  console.log('CLIENT: Disconnected from Host');
-                  if (!isCleanedUp.current) setConnectionStatus('reconnecting');
-              });
-              
-              conn.on('error', () => {
-                   if (!isCleanedUp.current) setConnectionStatus('error');
-              });
-          });
+      client.on('connect', () => {
+          if (isCleanedUp.current) return;
+          clearTimeout(connectionTimeout);
+          console.log('MQTT Connected');
+          setConnectionStatus('connected');
           
-          peer.on('error', (err) => {
-              // If Host ID is unavailable, it might be starting up. Retry.
-              if (err.type === 'peer-unavailable') {
-                  if (retries > 0 && !isCleanedUp.current) {
-                       console.log(`Host not found yet, retrying... (${retries} left)`);
-                       setTimeout(() => {
-                           if(!isCleanedUp.current) {
-                               initializeClient(retries - 1);
-                           }
-                       }, 2000);
-                       return;
+          client.subscribe(roomTopicRef.current, (err) => {
+              if (err) console.error('Sub error:', err);
+              else {
+                  // После подписки, если мы хост - инициализируем стейт
+                  if (initialMode === 'create') {
+                      setIsHost(true);
+                      const savedState = localStorage.getItem(`tysiacha-state-${roomCode}`);
+                      let initialState;
+                      if (savedState) {
+                          try { initialState = JSON.parse(savedState); } catch (e) { initialState = createInitialState(); }
+                      } else {
+                          initialState = createInitialState();
+                          initialState.hostId = 0;
+                          initialState.players[0] = { 
+                              ...initialState.players[0], 
+                              name: playerName, 
+                              isClaimed: true, 
+                              sessionId: mySessionIdRef.current, 
+                              status: 'online' 
+                          };
+                          initialState.gameMessage = `${playerName} создал(а) игру.`;
+                      }
+                      dispatch({ type: 'SET_STATE', payload: initialState });
+                      // Broadcast immediate state
+                      client.publish(roomTopicRef.current, JSON.stringify({ type: 'SET_STATE', payload: initialState, senderId: mySessionIdRef.current }));
+                  } else {
+                      // Если мы клиент - просим пустить нас
+                      // Сначала посылаем PING чтобы спровоцировать отправку стейта от хоста, если он там уже есть
+                      client.publish(roomTopicRef.current, JSON.stringify({ type: 'PLAYER_JOIN', payload: { playerName, sessionId: mySessionIdRef.current }, senderId: mySessionIdRef.current }));
                   }
               }
-              console.error('CLIENT Peer Error:', err);
-              if (!isCleanedUp.current) setConnectionStatus('error');
           });
-      } catch(e) {
-          console.error(e);
-          setConnectionStatus('error');
-      }
-  };
+      });
 
-  // --- INITIALIZATION ---
-  React.useEffect(() => {
-      isCleanedUp.current = false;
-      if (initialMode === 'create') {
-          initializeHost(5); // Start with 5 retries for Host to handle ghosting
-      } else {
-          initializeClient(3); // Start with retries for Client too
-      }
+      client.on('message', (topic, message) => {
+          if (isCleanedUp.current) return;
+          if (topic !== roomTopicRef.current) return;
+
+          try {
+              const data = JSON.parse(message.toString());
+              
+              // Игнорируем свои собственные сообщения (эхо)
+              if (data.senderId === mySessionIdRef.current) return;
+
+              if (data.type === 'PING_HOST') {
+                  if (isHost) {
+                      // Кто-то проверяет комнату. Отвечаем.
+                      client.publish(roomTopicRef.current, JSON.stringify({ type: 'PONG_HOST', senderId: mySessionIdRef.current }));
+                  }
+                  return;
+              }
+
+              // Обработка для Хоста: действия игроков
+              if (isHost) {
+                  if (data.type !== 'SET_STATE') {
+                      dispatch({ ...data, _senderId: data.senderId });
+                  }
+              }
+
+              // Обработка для Всех: получение стейта
+              if (data.type === 'SET_STATE') {
+                  // Если мы клиент - просто обновляем стейт
+                  if (!isHost) {
+                      dispatch({ type: 'SET_STATE', payload: data.payload });
+                  } else {
+                      // Конфликт хостов? (редкий кейс, игнорируем пока или делаем merge)
+                  }
+              }
+
+          } catch (e) { console.error('Msg Parse Error', e); }
+      });
+
+      client.on('error', (err) => {
+          console.error('MQTT Error', err);
+          // Don't set error immediately, allow for failover
+      });
+
+      client.on('offline', () => {
+          console.log('MQTT Offline');
+          if (!isCleanedUp.current && connectionStatus === 'connected') setConnectionStatus('reconnecting');
+      });
 
       return () => {
           isCleanedUp.current = true;
-          if (peerRef.current) peerRef.current.destroy();
+          clearTimeout(connectionTimeout);
+          if (client) client.end();
       };
-  }, [roomCode, initialMode, retryCount]); // Retry count allows manual retry
+  }, [roomCode, initialMode, playerName, isHost, isLocalMode]);
 
-  // --- HOST: BROADCAST ---
+  // --- HOST BROADCAST ---
+  // Как только стейт меняется у хоста, отправляем его всем
   React.useEffect(() => {
-      if (isHost && gameState && connectionsRef.current) {
+      if (isLocalMode) return; // Skip broadcast for local
+
+      if (isHost && gameState && clientRef.current && clientRef.current.connected) {
           localStorage.setItem(`tysiacha-state-${roomCode}`, JSON.stringify(gameState));
-          connectionsRef.current.forEach(conn => {
-              if (conn.open) conn.send({ type: 'SET_STATE', payload: gameState });
-          });
+          clientRef.current.publish(roomTopicRef.current, JSON.stringify({ type: 'SET_STATE', payload: gameState, senderId: mySessionIdRef.current }));
       }
-  }, [gameState, isHost, roomCode]);
+  }, [gameState, isHost, roomCode, isLocalMode]);
 
   // --- SELF IDENTITY ---
   React.useEffect(() => {
+      if (isLocalMode) return;
+
+      sessionStorage.setItem('tysiacha-sessionId', mySessionIdRef.current);
       if (gameState) {
           const me = gameState.players.find(p => p.sessionId === mySessionIdRef.current);
           setMyPlayerId(me ? me.id : null);
           setIsSpectator(gameState.spectators.some(s => s.id === mySessionIdRef.current));
-          
-          if (me) {
-            localStorage.setItem('tysiacha-session', JSON.stringify({ 
-                roomCode, 
-                playerName,
-                mode: isHost ? 'create' : 'join' // Save mode for reload
-            }));
-          }
       }
-  }, [gameState, isHost]);
+  }, [gameState, isLocalMode]);
 
   const sendAction = (action) => {
-      if (isHost) {
+      if (isLocalMode) {
+          // Local mode: just dispatch
           dispatch(action);
-      } else if (hostConnRef.current && hostConnRef.current.open) {
-          hostConnRef.current.send(action);
+      } else if (isHost) {
+          // Если я хост, я применяю действие локально, useEffect выше отправит новый стейт всем
+          dispatch(action);
+      } else if (clientRef.current && clientRef.current.connected) {
+          // Если я клиент, я отправляю действие в сеть
+          clientRef.current.publish(roomTopicRef.current, JSON.stringify({ ...action, senderId: mySessionIdRef.current }));
       }
   };
-  
+
   const manualRetry = () => {
-      setConnectionStatus('connecting');
-      setRetryCount(prev => prev + 1);
+      window.location.reload(); // Простейший способ ретрая для MQTT
   };
 
   const [isScoreboardExpanded, setIsScoreboardExpanded] = React.useState(false);
@@ -553,51 +504,34 @@ const Game = ({ roomCode, playerName, initialMode, onExit }) => {
   const [isDragOver, setIsDragOver] = React.useState(false);
   const [kickConfirmState, setKickConfirmState] = React.useState({ isOpen: false, player: null });
 
-  if (connectionStatus !== 'connected' && !gameState) {
-      let errorMsg = '';
-      let subMsg = '';
-      if (connectionStatus === 'error_busy') {
-          errorMsg = 'Код комнаты занят';
-          subMsg = 'Не удалось создать игру, так как этот код используется. Если вы перезагрузили страницу, подождите 10 секунд и нажмите "Повторить".';
-      } else if (connectionStatus === 'error_timeout') {
-          errorMsg = 'Хост не отвечает';
-          subMsg = 'Не удалось подключиться к хосту. Возможно, он вышел из игры или у него проблемы с сетью.';
-      } else if (connectionStatus === 'error') {
-          errorMsg = 'Ошибка подключения';
-          subMsg = 'Не удалось найти комнату или проблемы с P2P соединением. Проверьте код.';
-      } else if (connectionStatus === 'retrying') {
-          errorMsg = 'Переподключение...';
-          subMsg = 'Освобождаем код комнаты после перезагрузки...';
-      }
-
+  // --- RENDER LOADING/ERROR STATES ---
+  // Исправлено: теперь показываем экран загрузки если gameState нет, даже если подключение есть.
+  if (!gameState) {
       return React.createElement('div', { className: "text-center w-full p-8" }, 
-        React.createElement('h2', { className: `font-ruslan text-4xl mb-4 ${connectionStatus.startsWith('error') ? 'text-red-500' : 'text-title-yellow'}` }, 
-            connectionStatus.startsWith('error') ? errorMsg : (connectionStatus === 'retrying' ? errorMsg : 'Подключение...')
+        React.createElement('h2', { className: `font-ruslan text-4xl mb-4 ${connectionStatus === 'error' ? 'text-red-500' : 'text-title-yellow'}` }, 
+            connectionStatus === 'error' ? 'Ошибка сети' : (connectionStatus === 'connected' ? 'Синхронизация...' : 'Подключение...')
         ),
-        (connectionStatus.startsWith('error') || connectionStatus === 'retrying') && React.createElement('p', { className: "text-lg mb-6 max-w-md mx-auto" }, subMsg),
-        
-        (connectionStatus === 'connecting' || connectionStatus === 'retrying') && React.createElement('div', { className: "w-8 h-8 border-4 border-t-transparent border-title-yellow rounded-full animate-spin mx-auto" }),
-        
+        connectionStatus === 'error' && React.createElement('p', { className: "text-lg mb-6 max-w-md mx-auto" }, 'Не удалось подключиться к серверу игры. Попробуйте офлайн режим.'),
+        connectionStatus === 'connected' && React.createElement('p', { className: "text-lg mb-6 max-w-md mx-auto" }, 'Ждем данные от хоста...'),
+        (connectionStatus === 'connecting' || connectionStatus === 'reconnecting' || connectionStatus === 'connected') && React.createElement('div', { className: "w-8 h-8 border-4 border-t-transparent border-title-yellow rounded-full animate-spin mx-auto" }),
         React.createElement('div', { className: 'flex justify-center gap-4 mt-8' },
-            React.createElement('button', { onClick: onExit, className: "px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded" }, "Вернуться в меню"),
-            connectionStatus.startsWith('error') && React.createElement('button', { onClick: manualRetry, className: "px-4 py-2 bg-green-600 hover:bg-green-700 rounded" }, "Повторить")
+            React.createElement('button', { onClick: onExit, className: "px-4 py-2 bg-slate-700 hover:bg-slate-700 rounded" }, "В меню"),
+            connectionStatus === 'error' && React.createElement('button', { onClick: manualRetry, className: "px-4 py-2 bg-green-600 hover:bg-green-700 rounded" }, "Повторить")
         )
       );
   }
 
-  if (!gameState) return null;
-
-  const isMyTurn = myPlayerId === gameState.currentPlayerIndex && !isSpectator;
-  const isGameHost = myPlayerId === gameState.hostId; 
+  // In local mode, it's always "my turn" if the game isn't over, because the user controls all players.
+  const isMyTurn = isLocalMode ? true : (myPlayerId === gameState.currentPlayerIndex && !isSpectator);
   
   const uiProps = {
-    roomCode,
+    roomCode: isLocalMode ? 'LOCAL' : roomCode,
     gameState,
-    myPlayerId,
+    myPlayerId: isLocalMode ? gameState.currentPlayerIndex : myPlayerId,
     isSpectator,
     isMyTurn,
-    isHost: isGameHost,
-    canJoin: myPlayerId === null && !isSpectator,
+    isHost: isHost, 
+    canJoin: !isLocalMode && myPlayerId === null && !isSpectator,
     isAwaitingApproval: false,
     showRules,
     isSpectatorsModalOpen,
@@ -607,10 +541,13 @@ const Game = ({ roomCode, playerName, initialMode, onExit }) => {
     rollButtonText: (gameState.keptDiceThisTurn.length >= 5 ? 5 : 5 - gameState.keptDiceThisTurn.length) === 5 ? 'Бросить все' : `Бросить ${5 - gameState.keptDiceThisTurn.length}`,
     showSkipButton: false,
     claimedPlayerCount: gameState.players.filter(p => p.isClaimed && !p.isSpectator).length,
-    availableSlotsForJoin: gameState.players.filter(p => !p.isClaimed && !p.isSpectator).length,
+    availableSlotsForJoin: isLocalMode ? 0 : gameState.players.filter(p => !p.isClaimed && !p.isSpectator).length,
     currentPlayer: gameState.players[gameState.currentPlayerIndex],
     kickConfirmState,
-    onLeaveGame: () => { sendAction({ type: 'PLAYER_LEAVE', payload: { sessionId: mySessionIdRef.current } }); onExit(); },
+    onLeaveGame: () => { 
+        if (!isLocalMode) sendAction({ type: 'PLAYER_LEAVE', payload: { sessionId: mySessionIdRef.current } }); 
+        onExit(); 
+    },
     onSetShowRules: setShowRules,
     onSetIsSpectatorsModalOpen: setIsSpectatorsModalOpen,
     onSetIsScoreboardExpanded: setIsScoreboardExpanded,
@@ -618,7 +555,15 @@ const Game = ({ roomCode, playerName, initialMode, onExit }) => {
     onRollDice: () => sendAction({ type: 'ROLL_DICE' }),
     onBankScore: () => sendAction({ type: 'BANK_SCORE' }),
     onSkipTurn: () => sendAction({ type: 'SKIP_TURN' }),
-    onNewGame: () => sendAction({ type: 'NEW_GAME' }),
+    onNewGame: () => {
+        if (isLocalMode) {
+            // Reset local game
+             const newState = createLocalGameState(localConfig?.playerCount || 2);
+             dispatch({ type: 'SET_STATE', payload: newState });
+        } else {
+            sendAction({ type: 'NEW_GAME' });
+        }
+    },
     onStartOfficialGame: () => sendAction({ type: 'START_OFFICIAL_GAME' }),
     onJoinGame: () => sendAction({ type: 'PLAYER_JOIN', payload: { playerName, sessionId: mySessionIdRef.current } }),
     onJoinRequest: () => {}, 
