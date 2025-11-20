@@ -1,4 +1,5 @@
-const CACHE_NAME = 'tysiacha-cache-v1.1'; // Increment cache version
+
+const CACHE_NAME = 'tysiacha-cache-v1.4'; // Increment cache version
 const urlsToCache = [
   '.', // Кэшируем корневую директорию (эквивалент '/')
   'index.html',
@@ -7,6 +8,7 @@ const urlsToCache = [
   'index.js',
   'constants.js',
   'utils/gameLogic.js',
+  'utils/mqttUtils.js', // Renamed internally to PeerUtils but file stays
   'components/App.js',
   'components/Lobby.js',
   'components/Game.js',
@@ -15,9 +17,7 @@ const urlsToCache = [
   'components/RulesModal.js',
   'components/SpectatorsModal.js',
   'components/KickConfirmModal.js',
-  'components/PlayerContextMenu.js',
-  'components/hooks/useMqtt.js', // Add new hook
-  'components/hooks/useGameEngine.js' // Add new hook
+  'components/PlayerContextMenu.js'
 ];
 
 self.addEventListener('install', event => {

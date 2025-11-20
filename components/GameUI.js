@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { calculateTotalScore, getPlayerBarrelStatus } from '../utils/gameLogic.js';
 import RulesModal from './RulesModal.js';
@@ -296,7 +297,7 @@ const GameUI = (props) => {
                 )
               )
             ),
-            React.createElement('main', { className: `relative lg:col-span-3 bg-slate-900/70 rounded-xl border-2 flex flex-col justify-between min-h-0 p-2 sm:p-4 transition-all duration-500 ease-in-out ${isDragOver && isMyTurn ? 'border-green-400 shadow-2xl shadow-green-400/20' : 'border-slate-600'} ${isScoreboardExpanded ? 'flex-grow-0 opacity-0 pointer-events-none lg:flex-grow lg:opacity-100 lg:pointer-events-auto' : 'flex-grow'}`, onDragOver: (e) => {e.preventDefault(); onSetIsDragOver(true);}, onDrop: onDrop, onDragLeave: () => onSetIsDragOver(false) },
+            React.createElement('main', { className: `relative lg:col-span-3 bg-slate-900/70 rounded-xl border-2 flex flex-col justify-between min-h-0 p-2 sm:p-4 transition-all duration-500 ease-in-out ${isDragOver && isMyTurn ? 'border-green-400 shadow-2xl shadow-green-400/20' : 'border-slate-600'} ${isScoreboardExpanded ? 'hidden lg:flex' : 'flex'}`, onDragOver: (e) => {e.preventDefault(); onSetIsDragOver(true);}, onDrop: onDrop, onDragLeave: () => onSetIsDragOver(false) },
               React.createElement(JoinRequestManager, { isHost, gameState, onJoinRequest }),
               React.createElement('div', { className: "w-full" },
                 React.createElement('div', { className: `w-full p-2 sm:p-3 mb-2 sm:mb-4 text-center rounded-lg ${gameState.isGameOver ? 'bg-green-600' : 'bg-slate-800'} border border-slate-600 flex items-center justify-center min-h-[60px] sm:min-h-[72px]` },

@@ -1,16 +1,12 @@
+
 import React from 'react';
-import { MQTT_BROKER_URL, MQTT_TOPIC_PREFIX } from '../constants.js';
+import { initClientPeer, connectToHost } from '../utils/mqttUtils.js'; // Actually imports PeerJS utils
 
 const Lobby = ({ onStartGame, initialRoomCode }) => {
   const [roomCode, setRoomCode] = React.useState('');
   const [playerName, setPlayerName] = React.useState('');
-  const [roomStatus, setRoomStatus] = React.useState(null); // { status: 'loading' | 'found' | 'not_found', message?: string, data?: { hostName: string, playerCount: number } }
-  const [isClientConnected, setIsClientConnected] = React.useState(false);
-  
-  const mqttClientRef = React.useRef(null);
-  const statusCheckTimeoutRef = React.useRef(null);
-  const currentTopicRef = React.useRef(null);
-  const debounceTimeoutRef = React.useRef(null);
+  const [roomStatus, setRoomStatus] = React.useState(null); // { status: 'loading' | 'found' | 'not_found', message?: string }
+  const [isLoading, setIsLoading] = React.useState(false);
 
   // Effect to load saved data and generate initial room code if needed
   React.useEffect(() => {
@@ -21,159 +17,144 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
     if (initialRoomCode) {
       setRoomCode(initialRoomCode);
     } else {
-      const lastRoom = localStorage.getItem('tysiacha-lastRoom');
-      if (lastRoom) {
-        setRoomCode(lastRoom);
-      } else {
-        generateRoomCode();
-      }
+      generateRoomCode();
     }
   }, [initialRoomCode]);
 
-  // Effect to manage the single MQTT client lifecycle
-  React.useEffect(() => {
-    const client = mqtt.connect(MQTT_BROKER_URL);
-    mqttClientRef.current = client;
-
-    client.on('connect', () => {
-      setIsClientConnected(true);
-    });
-
-    client.on('close', () => {
-      setIsClientConnected(false);
-    });
-    client.on('error', () => {
-      setIsClientConnected(false);
-    });
-
-    const onMessage = (topic, message) => {
-      // Check if the message is for the topic we are currently interested in
-      if (topic === currentTopicRef.current) {
-        clearTimeout(statusCheckTimeoutRef.current);
-        try {
-          const state = JSON.parse(message.toString());
-          const host = state.players.find(p => p.id === state.hostId);
-          const playerCount = state.players.filter(p => p.isClaimed && !p.isSpectator).length;
-          setRoomStatus({
-            status: 'found',
-            data: {
-              hostName: host ? host.name : 'Неизвестен',
-              playerCount: playerCount,
-            }
-          });
-        } catch (e) {
-          setRoomStatus({ status: 'found' }); // Found, but couldn't parse details
-        }
-      }
-    };
-    
-    client.on('message', onMessage);
-
-    return () => {
-      if (client) {
-        client.end(true);
-      }
-    };
-  }, []);
-
-  // Debounced effect to check room status, now depends on client connection
-  React.useEffect(() => {
-    clearTimeout(debounceTimeoutRef.current);
-    clearTimeout(statusCheckTimeoutRef.current);
-
-    const code = roomCode.trim().toUpperCase();
-    const client = mqttClientRef.current;
-
-    if (!isClientConnected || code.length < 4) {
-      setRoomStatus(null);
-      if (client && currentTopicRef.current && client.connected) {
-        client.unsubscribe(currentTopicRef.current);
-      }
-      currentTopicRef.current = null;
-      return;
-    }
-    
-    // Set loading state immediately for better UX
-    setRoomStatus({ status: 'loading' });
-
-    debounceTimeoutRef.current = setTimeout(() => {
-      if (!client || !client.connected) {
-        setRoomStatus({ status: 'not_found', message: 'Ошибка сети' });
-        return;
-      }
-
-      // Unsubscribe from the previous topic
-      if (currentTopicRef.current) {
-        client.unsubscribe(currentTopicRef.current);
-      }
-      
-      const newTopic = `${MQTT_TOPIC_PREFIX}/${code}`;
-      currentTopicRef.current = newTopic;
-      client.subscribe(newTopic);
-      
-      // Set a timeout for the 'not_found' case
-      statusCheckTimeoutRef.current = setTimeout(() => {
-        setRoomStatus({ status: 'not_found' });
-      }, 2000); // 2 seconds is plenty for a response over an existing connection
-
-    }, 300); // 300ms debounce delay
-
-  }, [roomCode, isClientConnected]);
-
   const generateRoomCode = () => {
-    const chars = 'АБВГДЕЖЗИКЛМНПРСТУФХЦЧШЫЭЮЯ123456789';
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing chars like I, 1, O, 0
     let result = '';
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 5; i++) { // 5 chars is enough for P2P collision avoidance usually
       result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     setRoomCode(result);
+    setRoomStatus(null);
   };
+
+  // Проверка существования комнаты через попытку подключения
+  const checkRoom = React.useCallback(async () => {
+    const code = roomCode.trim().toUpperCase();
+    if (code.length < 4) return;
+
+    setIsLoading(true);
+    setRoomStatus({ status: 'loading' });
+
+    try {
+        const peer = initClientPeer();
+        
+        peer.on('open', () => {
+            const conn = connectToHost(peer, code);
+            let connected = false;
+
+            // Таймаут на поиск комнаты
+            const timeout = setTimeout(() => {
+                if (!connected) {
+                    setRoomStatus({ status: 'not_found', message: 'Комната не найдена или хост оффлайн' });
+                    conn.close();
+                    peer.destroy();
+                    setIsLoading(false);
+                }
+            }, 3000); // 3 секунды на поиск
+
+            conn.on('open', () => {
+                connected = true;
+                clearTimeout(timeout);
+                // Мы подключились - значит комната есть
+                // Спрашиваем инфо? Пока просто считаем что нашли.
+                // Для P2P лучше не держать лишних соединений в лобби.
+                setRoomStatus({ status: 'found', message: 'Комната найдена!' });
+                
+                // Закрываем тестовое соединение
+                setTimeout(() => {
+                    conn.close();
+                    peer.destroy();
+                    setIsLoading(false);
+                }, 500);
+            });
+
+            peer.on('error', (err) => {
+                console.log('Peer Check Error', err);
+                // Обычно peer-unavailable падает сюда
+                clearTimeout(timeout);
+                setRoomStatus({ status: 'not_found', message: 'Комната не существует' });
+                peer.destroy();
+                setIsLoading(false);
+            });
+        });
+
+        peer.on('error', (err) => {
+             console.warn('Peer Init Error', err);
+             setIsLoading(false);
+             setRoomStatus({ status: 'not_found', message: 'Ошибка сети P2P' });
+        });
+
+    } catch (e) {
+        console.error(e);
+        setRoomStatus({ status: 'not_found', message: 'Ошибка' });
+        setIsLoading(false);
+    }
+  }, [roomCode]);
+
+  // Debounced check handled manually by user clicking "Check" or Effect? 
+  // Let's make it explicit for P2P to save resources, or simple timeout
+  React.useEffect(() => {
+      if (roomCode.length >= 4) {
+          const timer = setTimeout(() => {
+             // В P2P проверка дорогая (создает сокеты), поэтому не делаем её на каждый чих
+             // Но для UX можно сбросить статус
+             setRoomStatus(null); 
+          }, 500);
+          return () => clearTimeout(timer);
+      }
+  }, [roomCode]);
+
 
   const handleStart = () => {
     const finalRoomCode = roomCode.trim().toUpperCase();
     const finalPlayerName = playerName.trim();
+    
     if (finalRoomCode.length >= 4 && finalPlayerName.length > 2) {
       localStorage.setItem('tysiacha-playerName', finalPlayerName);
+      // Если мы не проверяли комнату или не нашли её, мы считаем что создаем новую (Хост)
+      // Если нашли - мы Джойнер
+      // НО: В P2P Хост должен захватить ID. Если ID занят, он не сможет стать Хостом.
+      // Поэтому мы передаем управление в Game, и Game сама разрулит (станет хостом или подключится)
+      // Исходя из UX: Кнопка "Создать" и "Войти" может быть одна.
+      // Game.js попытается стать Хостом. Если ID занят -> подключится как клиент.
+      
       onStartGame(finalRoomCode, finalPlayerName);
     }
   };
   
   const RoomStatusInfo = () => {
     if (!roomCode || roomCode.trim().length < 4) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Код должен быть не менее 4 символов');
-    if (!isClientConnected) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px] flex items-center justify-center" }, React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-title-yellow rounded-full animate-spin mr-2"}), 'Подключение к сети...');
-    if (!roomStatus) return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Придумайте код или введите существующий');
     
-    let content;
-    let icon;
-    
-    switch(roomStatus.status) {
-        case 'loading':
-            icon = React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-title-yellow rounded-full animate-spin mr-2"});
-            content = 'Проверка комнаты...';
-            break;
-        case 'not_found':
-            icon = React.createElement('svg', { xmlns:"http://www.w3.org/2000/svg", className:"h-5 w-5 mr-2 text-blue-400", viewBox:"0 0 20 20", fill:"currentColor" }, React.createElement('path', { fillRule:"evenodd", d:"M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z", clipRule:"evenodd" }));
-            content = roomStatus.message || 'Комната не найдена. Можно создать новую.';
-            break;
-        case 'found':
-            icon = React.createElement('svg', { xmlns:"http://www.w3.org/2000/svg", className:"h-5 w-5 mr-2 text-green-400", viewBox:"0 0 20 20", fill:"currentColor" }, React.createElement('path', { fillRule:"evenodd", d:"M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z", clipRule:"evenodd" }));
-            const { hostName, playerCount } = roomStatus.data || {};
-            if (hostName && typeof playerCount === 'number') {
-                content = `Хост: ${hostName}, Игроков: ${playerCount}/5`;
-            } else {
-                content = 'Комната найдена. Можно войти.';
-            }
-            break;
-        default:
-            return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px]" }, 'Придумайте код или введите существующий');
+    if (isLoading || roomStatus?.status === 'loading') {
+         return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px] flex items-center justify-center" }, 
+            React.createElement('div', { className: "flex items-center" },
+                React.createElement('div', {className: "w-4 h-4 border-2 border-t-transparent border-title-yellow rounded-full animate-spin mr-2"}), 
+                'Поиск комнаты в P2P сети...'
+            )
+        );
+    }
+
+    if (roomStatus?.status === 'found') {
+        return React.createElement('div', { className: "text-sm text-green-400 mt-2 min-h-[20px] flex items-center justify-center font-bold" }, 
+             'Комната найдена! Нажмите Войти.'
+        );
     }
     
-    return React.createElement('div', { className: "text-sm text-gray-400 mt-2 min-h-[20px] flex items-center justify-center" }, icon, content);
+    if (roomStatus?.status === 'not_found') {
+        return React.createElement('div', { className: "text-sm text-blue-300 mt-2 min-h-[20px] flex items-center justify-center" }, 
+             'Комната свободна. Вы станете Хостом.'
+        );
+    }
+    
+    return React.createElement('div', { className: "text-sm text-gray-500 mt-2 min-h-[20px]" }, 'Введите код для входа или создания');
   }
 
-  const buttonText = roomStatus?.status === 'found' ? 'Войти в игру' : 'Создать и войти';
-  const isButtonDisabled = roomCode.trim().length < 4 || playerName.trim().length < 3 || roomStatus?.status === 'loading' || !isClientConnected;
-
+  const buttonText = 'Играть';
+  const isButtonDisabled = roomCode.trim().length < 4 || playerName.trim().length < 3 || isLoading;
 
   return React.createElement(
     'div',
@@ -215,6 +196,7 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
               type: "text",
               value: roomCode,
               onChange: (e) => setRoomCode(e.target.value.toUpperCase()),
+              onBlur: checkRoom, // Проверяем комнату когда закончили ввод
               placeholder: "Введите код",
               className: "w-full p-3 pr-12 text-center bg-slate-900 border-2 border-slate-600 rounded-lg text-2xl font-mono tracking-widest text-white focus:outline-none focus:border-highlight transition-colors"
             }),
@@ -229,7 +211,7 @@ const Lobby = ({ onStartGame, initialRoomCode }) => {
                 React.createElement(
                     'svg',
                     { xmlns: "http://www.w3.org/2000/svg", className: "h-6 w-6", fill: "none", viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 2 },
-                    React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.898 20.562L16.25 21.75l-.648-1.188a2.25 2.25 0 01-1.44-1.442L12.97 18.75l1.188-.648a2.25 2.25 0 011.44 1.442l.648 1.188z" })
+                    React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", d: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" })
                 )
             )
         ),
