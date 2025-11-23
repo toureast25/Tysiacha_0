@@ -1,5 +1,7 @@
 
-const CACHE_NAME = 'tysiacha-cache-v1.0.18'; // Increment cache version
+
+
+const CACHE_NAME = 'tysiacha-cache-v1.0.20'; // Increment cache version
 const urlsToCache = [
   '.', // Кэшируем корневую директорию (эквивалент '/')
   'index.html',
@@ -9,6 +11,7 @@ const urlsToCache = [
   'constants.js',
   'utils/gameLogic.js',
   'utils/mqttUtils.js', 
+  'utils/config.js', // Добавлен конфиг файл
   'components/App.js',
   'components/Lobby.js',
   'components/Game.js',

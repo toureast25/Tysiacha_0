@@ -1,9 +1,5 @@
 
-// --- MQTT UTILITIES ---
-
-// Переключились на EMQX, так как он более стабилен для WSS (WebSocket Secure) подключений.
-// HiveMQ часто имеет проблемы с таймаутами на публичных брокерах.
-const PRIMARY_BROKER = 'wss://broker.emqx.io:8084/mqtt';
+import { mqttConfig } from './config.js';
 
 const APP_PREFIX = 'tysiacha-v3-app';
 
@@ -18,16 +14,25 @@ export const createMqttClient = (clientId) => {
         throw new Error("MQTT library not loaded");
     }
 
-    console.log('[MQTT] Connecting to shared broker:', PRIMARY_BROKER);
+    const brokerUrl = `${mqttConfig.protocol}://${mqttConfig.host}:${mqttConfig.port}${mqttConfig.path}`;
+    console.log('[MQTT] Connecting to private broker:', brokerUrl);
     
-    const client = window.mqtt.connect(PRIMARY_BROKER, {
+    // Опции подключения, включая авторизацию для HiveMQ Cloud
+    const options = {
         clientId: clientId || `guest_${Math.random().toString(16).substr(2, 8)}`,
-        keepalive: 30, // Оптимизировано: 30 секунд достаточно для поддержания
+        keepalive: 60,
         clean: true,
-        reconnectPeriod: 2000, // Быстрый реконнект
-        connectTimeout: 10000, // 10 секунд на попытку
+        reconnectPeriod: 2000, 
+        connectTimeout: 10000,
         resubscribe: true,
-    });
+        // Учетные данные из конфига
+        username: mqttConfig.username,
+        password: mqttConfig.password,
+        // HiveMQ Cloud требует SSL
+        ssl: true, 
+    };
+
+    const client = window.mqtt.connect(brokerUrl, options);
 
     return client;
 };
@@ -41,7 +46,7 @@ export const checkRoomAvailability = (roomCode) => {
              client = createMqttClient(tempId);
         } catch (e) {
              console.error("Failed to create MQTT client for check:", e);
-             resolve({ exists: false }); // Fallback: разрешаем создать, если не удалось проверить
+             resolve({ exists: false });
              return;
         }
 
@@ -51,7 +56,7 @@ export const checkRoomAvailability = (roomCode) => {
 
         client.on('connect', () => {
             console.log('[Check] Connected, subscribing...');
-            client.subscribe(topic, { qos: 1 }, (err) => { // QoS 1 для надежности
+            client.subscribe(topic, { qos: 1 }, (err) => { 
                 if (!err) {
                     // Отправляем запрос "Ты жив?"
                     client.publish(topic, JSON.stringify({ type: 'PING_HOST', senderId: tempId }));
@@ -72,19 +77,16 @@ export const checkRoomAvailability = (roomCode) => {
             } catch (e) {}
         });
 
+        client.on('error', (err) => {
+            console.warn("Check room temporary error (check credentials in config.js):", err);
+        });
+
         // Ждем ответа. 
-        // 5 секунд должно хватить для EMQX. Если больше - скорее всего никого нет или сеть лежит.
         timeout = setTimeout(() => {
             if (!found) {
                 if (client) client.end(true);
                 resolve({ exists: false });
             }
         }, 5000);
-
-        client.on('error', (err) => {
-            console.warn("Check room temporary error:", err);
-            // Если ошибка соединения - не блокируем пользователя, разрешаем создать.
-            // Split-brain логика в Game.js исправит дублирование, если оно возникнет.
-        });
     });
 };
