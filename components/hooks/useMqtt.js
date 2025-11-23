@@ -19,6 +19,12 @@ export const useMqtt = ({
     const roomTopicRef = React.useRef(getRoomTopic(roomCode || 'LOCAL'));
     const isCleanedUp = React.useRef(false);
 
+    // Используем Ref для отслеживания статуса хоста внутри эффекта без перезапуска эффекта
+    const isHostRef = React.useRef(isHost);
+    React.useEffect(() => {
+        isHostRef.current = isHost;
+    }, [isHost]);
+
     React.useEffect(() => {
         if (isLocalMode) return; // SKIP MQTT FOR LOCAL GAME
 
@@ -60,7 +66,7 @@ export const useMqtt = ({
                     if (err.message === 'client disconnecting') return;
                     console.error('Sub error:', err);
                 } else {
-                    // После подписки, если мы хост - инициализируем стейт
+                    // После подписки, если мы создавали комнату - инициализируем стейт
                     if (initialMode === 'create') {
                         setIsHost(true);
                         const savedState = localStorage.getItem(`tysiacha-state-${roomCode}`);
@@ -103,23 +109,23 @@ export const useMqtt = ({
                 if (data.senderId === mySessionId) return;
 
                 if (data.type === 'PING_HOST') {
-                    if (isHost) {
+                    if (isHostRef.current) {
                         // Кто-то проверяет комнату. Отвечаем.
                         client.publish(roomTopicRef.current, JSON.stringify({ type: 'PONG_HOST', senderId: mySessionId }));
                     }
                     return;
                 }
 
-                // ОБРАБОТКА REQUEST_STATE (Используем Ref, т.к. gameState в замыкании может быть старым)
+                // ОБРАБОТКА REQUEST_STATE
                 if (data.type === 'REQUEST_STATE') {
-                    if (isHost && gameStateRef.current) {
+                    if (isHostRef.current && gameStateRef.current) {
                         client.publish(roomTopicRef.current, JSON.stringify({ type: 'SET_STATE', payload: gameStateRef.current, senderId: mySessionId }));
                     }
                     return;
                 }
 
                 // Обработка для Хоста: действия игроков
-                if (isHost) {
+                if (isHostRef.current) {
                     if (data.type !== 'SET_STATE') {
                         dispatch({ ...data, _senderId: data.senderId });
                     }
@@ -129,7 +135,7 @@ export const useMqtt = ({
                 if (data.type === 'SET_STATE') {
                     const remoteState = data.payload;
                     
-                    if (!isHost) {
+                    if (!isHostRef.current) {
                         // Клиент просто обновляется
                         dispatch({ type: 'SET_STATE', payload: remoteState });
                     } else {
@@ -179,7 +185,7 @@ export const useMqtt = ({
             clearTimeout(connectionTimeout);
             if (client) client.end(true); // Force end
         };
-    }, [roomCode, initialMode, playerName, isHost, isLocalMode]);
+    }, [roomCode, initialMode, playerName, isLocalMode]); // УБРАНО isHost ИЗ ЗАВИСИМОСТЕЙ
 
     React.useEffect(() => {
         if (isLocalMode) return;
