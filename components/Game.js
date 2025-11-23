@@ -359,19 +359,31 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
           if (client && !client.connected && !isCleanedUp.current) {
               console.warn('MQTT Connection Timed Out');
               setConnectionStatus('error');
-              client.end();
+              client.end(true); // Force end
           }
       }, 30000); 
 
       client.on('connect', () => {
-          if (isCleanedUp.current) return;
+          // STRICT MODE SAFETY:
+          // If the component has been unmounted (isCleanedUp is true), immediately close the client.
+          // This prevents "client disconnecting" errors in subscribe calls that might trigger after cleanup.
+          if (isCleanedUp.current) {
+              client.end(true); 
+              return;
+          }
+
           clearTimeout(connectionTimeout);
           console.log('MQTT Connected');
           setConnectionStatus('connected');
           
           client.subscribe(roomTopicRef.current, (err) => {
-              if (err) console.error('Sub error:', err);
-              else {
+              if (isCleanedUp.current) return;
+              if (err) {
+                  // Suppress the "client disconnecting" error which happens if the socket closes 
+                  // while subscription is pending (common in unstable networks or React StrictMode re-renders).
+                  if (err.message === 'client disconnecting') return;
+                  console.error('Sub error:', err);
+              } else {
                   // После подписки, если мы хост - инициализируем стейт
                   if (initialMode === 'create') {
                       setIsHost(true);
@@ -454,7 +466,7 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
       return () => {
           isCleanedUp.current = true;
           clearTimeout(connectionTimeout);
-          if (client) client.end();
+          if (client) client.end(true); // Force end
       };
   }, [roomCode, initialMode, playerName, isHost, isLocalMode]);
 
