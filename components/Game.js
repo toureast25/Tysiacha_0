@@ -354,7 +354,6 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
       }
       
       // Timeout safety for connection hanging
-      // Increased to 30s because we might cycle through multiple brokers
       const connectionTimeout = setTimeout(() => {
           if (client && !client.connected && !isCleanedUp.current) {
               console.warn('MQTT Connection Timed Out');
@@ -364,9 +363,6 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
       }, 30000); 
 
       client.on('connect', () => {
-          // STRICT MODE SAFETY:
-          // If the component has been unmounted (isCleanedUp is true), immediately close the client.
-          // This prevents "client disconnecting" errors in subscribe calls that might trigger after cleanup.
           if (isCleanedUp.current) {
               client.end(true); 
               return;
@@ -376,11 +372,9 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
           console.log('MQTT Connected');
           setConnectionStatus('connected');
           
-          client.subscribe(roomTopicRef.current, (err) => {
+          client.subscribe(roomTopicRef.current, { qos: 1 }, (err) => {
               if (isCleanedUp.current) return;
               if (err) {
-                  // Suppress the "client disconnecting" error which happens if the socket closes 
-                  // while subscription is pending (common in unstable networks or React StrictMode re-renders).
                   if (err.message === 'client disconnecting') return;
                   console.error('Sub error:', err);
               } else {
@@ -408,7 +402,6 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
                       client.publish(roomTopicRef.current, JSON.stringify({ type: 'SET_STATE', payload: initialState, senderId: mySessionIdRef.current }));
                   } else {
                       // Если мы клиент - просим пустить нас
-                      // Сначала посылаем PING чтобы спровоцировать отправку стейта от хоста, если он там уже есть
                       client.publish(roomTopicRef.current, JSON.stringify({ type: 'PLAYER_JOIN', payload: { playerName, sessionId: mySessionIdRef.current }, senderId: mySessionIdRef.current }));
                   }
               }
@@ -442,11 +435,42 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
 
               // Обработка для Всех: получение стейта
               if (data.type === 'SET_STATE') {
-                  // Если мы клиент - просто обновляем стейт
+                  const remoteState = data.payload;
+                  
                   if (!isHost) {
-                      dispatch({ type: 'SET_STATE', payload: data.payload });
+                      // Клиент просто обновляется
+                      dispatch({ type: 'SET_STATE', payload: remoteState });
                   } else {
-                      // Конфликт хостов? (редкий кейс, игнорируем пока или делаем merge)
+                      // === SPLIT-BRAIN RESOLUTION ===
+                      // Мы считаем себя хостом, но получили стейт от другого хоста.
+                      // Это происходит, если оба игрока создали комнату одновременно.
+                      if (data.senderId !== mySessionIdRef.current) {
+                           console.warn('Host Collision: Two hosts detected!');
+                           
+                           // Решаем конфликт. Приоритет у того, у кого больше игроков (игра активнее).
+                           // Если поровну - простейшая проверка по ID сессии.
+                           const myPlayerCount = gameState ? gameState.players.filter(p => p.isClaimed).length : 0;
+                           const remotePlayerCount = remoteState ? remoteState.players.filter(p => p.isClaimed).length : 0;
+                           
+                           let shouldYield = false;
+                           
+                           if (remotePlayerCount > myPlayerCount) {
+                               shouldYield = true;
+                           } else if (remotePlayerCount === myPlayerCount) {
+                               // Лексикографическое сравнение ID для детерминированного выбора
+                               if (data.senderId < mySessionIdRef.current) {
+                                   shouldYield = true;
+                               }
+                           }
+                           
+                           if (shouldYield) {
+                               console.log('Downgrading to Client (Conflict Resolution)');
+                               setIsHost(false);
+                               dispatch({ type: 'SET_STATE', payload: remoteState });
+                           } else {
+                               console.log('Staying Host (Conflict Resolution). Expecting other to yield.');
+                           }
+                      }
                   }
               }
 
@@ -455,7 +479,6 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
 
       client.on('error', (err) => {
           console.error('MQTT Error', err);
-          // Don't set error immediately, allow for failover
       });
 
       client.on('offline', () => {
@@ -517,7 +540,6 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
   const [kickConfirmState, setKickConfirmState] = React.useState({ isOpen: false, player: null });
 
   // --- RENDER LOADING/ERROR STATES ---
-  // Исправлено: теперь показываем экран загрузки если gameState нет, даже если подключение есть.
   if (!gameState) {
       return React.createElement('div', { className: "text-center w-full p-8" }, 
         React.createElement('h2', { className: `font-ruslan text-4xl mb-4 ${connectionStatus === 'error' ? 'text-red-500' : 'text-title-yellow'}` }, 

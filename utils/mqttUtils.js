@@ -1,25 +1,9 @@
 
 // --- MQTT UTILITIES ---
-// Используем массив публичных брокеров для надежности (Failover).
-// Если один недоступен, библиотека попытается подключиться к следующему.
 
-// Список брокеров. Важно использовать WSS (Secure WebSocket) для работы с HTTPS.
-const ALL_BROKERS = [
-    'wss://test.mosquitto.org:8081/mqtt',  // Mosquitto (Обычно самый надежный)
-    'wss://broker.emqx.io:8084/mqtt',      // EMQX (Secure)
-    'wss://public.mqtthq.com:8084/mqtt',   // HQ (Secure)
-    'wss://broker.hivemq.com:8000/mqtt',   // HiveMQ (Secure)
-];
-
-// Перемешиваем брокеров при каждом запуске, чтобы распределить нагрузку
-const getShuffledBrokers = () => {
-    const brokers = [...ALL_BROKERS];
-    for (let i = brokers.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [brokers[i], brokers[j]] = [brokers[j], brokers[i]];
-    }
-    return brokers;
-};
+// Переключились на EMQX, так как он более стабилен для WSS (WebSocket Secure) подключений.
+// HiveMQ часто имеет проблемы с таймаутами на публичных брокерах.
+const PRIMARY_BROKER = 'wss://broker.emqx.io:8084/mqtt';
 
 const APP_PREFIX = 'tysiacha-v3-app';
 
@@ -34,21 +18,14 @@ export const createMqttClient = (clientId) => {
         throw new Error("MQTT library not loaded");
     }
 
-    // Получаем перемешанный список
-    const brokers = getShuffledBrokers();
-    // Выбираем первый из списка. 
-    // Библиотека mqtt.js в браузере (v4.3.7) требует строку URL первым аргументом, а не массив.
-    // Случайный выбор происходит благодаря getShuffledBrokers.
-    const selectedBroker = brokers[0];
+    console.log('[MQTT] Connecting to shared broker:', PRIMARY_BROKER);
     
-    console.log('[MQTT] Connecting to:', selectedBroker);
-    
-    const client = window.mqtt.connect(selectedBroker, {
+    const client = window.mqtt.connect(PRIMARY_BROKER, {
         clientId: clientId || `guest_${Math.random().toString(16).substr(2, 8)}`,
-        keepalive: 30,
+        keepalive: 30, // Оптимизировано: 30 секунд достаточно для поддержания
         clean: true,
-        reconnectPeriod: 2000, // Пробуем переподключаться каждые 2 секунды
-        connectTimeout: 10000, // Таймаут на попытку коннекта (10 сек)
+        reconnectPeriod: 2000, // Быстрый реконнект
+        connectTimeout: 10000, // 10 секунд на попытку
         resubscribe: true,
     });
 
@@ -64,7 +41,7 @@ export const checkRoomAvailability = (roomCode) => {
              client = createMqttClient(tempId);
         } catch (e) {
              console.error("Failed to create MQTT client for check:", e);
-             resolve({ exists: false });
+             resolve({ exists: false }); // Fallback: разрешаем создать, если не удалось проверить
              return;
         }
 
@@ -74,7 +51,7 @@ export const checkRoomAvailability = (roomCode) => {
 
         client.on('connect', () => {
             console.log('[Check] Connected, subscribing...');
-            client.subscribe(topic, (err) => {
+            client.subscribe(topic, { qos: 1 }, (err) => { // QoS 1 для надежности
                 if (!err) {
                     // Отправляем запрос "Ты жив?"
                     client.publish(topic, JSON.stringify({ type: 'PING_HOST', senderId: tempId }));
@@ -89,23 +66,25 @@ export const checkRoomAvailability = (roomCode) => {
                 if (data.type === 'PONG_HOST') {
                     found = true;
                     clearTimeout(timeout);
-                    client.end();
+                    client.end(true);
                     resolve({ exists: true });
                 }
             } catch (e) {}
         });
 
-        // Ждем 5 секунд.
+        // Ждем ответа. 
+        // 5 секунд должно хватить для EMQX. Если больше - скорее всего никого нет или сеть лежит.
         timeout = setTimeout(() => {
             if (!found) {
-                if (client) client.end();
+                if (client) client.end(true);
                 resolve({ exists: false });
             }
         }, 5000);
 
         client.on('error', (err) => {
             console.warn("Check room temporary error:", err);
-            // В случае ошибки подключения считаем, что комнаты нет или нельзя проверить
+            // Если ошибка соединения - не блокируем пользователя, разрешаем создать.
+            // Split-brain логика в Game.js исправит дублирование, если оно возникнет.
         });
     });
 };
