@@ -136,6 +136,7 @@ export const createInitialState = () => {
     spectators: [],
     leavers: {}, // Track scores of players who left
     joinRequests: [], // Track join requests for host approval
+    joinErrors: {}, // Map of sessionId -> errorMessage for rejected joins
     currentPlayerIndex: 0,
     hostId: 0, // Player 0 is the initial host
     diceOnBoard: [],

@@ -41,16 +41,40 @@ function gameReducer(state, action) {
             return { ...newState, spectators: [...newState.spectators, { name: playerName, id: sessionId }] };
         }
 
-        // 1. Попытка восстановить игрока по имени (Rejoin Logic)
+        // 1. Попытка восстановить игрока по имени (Rejoin Logic / Smart Join)
         const existingPlayerIndex = newState.players.findIndex(p => p.isClaimed && p.name === playerName);
+        
         if (existingPlayerIndex !== -1) {
-            // Игрок с таким именем уже есть. Перехватываем слот.
+            const existingPlayer = newState.players[existingPlayerIndex];
+            
+            // ЗАЩИТА ИМЕНИ: Если игрок онлайн и sessionId другой - это попытка дубликата или угона
+            if (existingPlayer.status === 'online' && existingPlayer.sessionId !== sessionId) {
+                return {
+                    ...newState,
+                    joinErrors: {
+                        ...(newState.joinErrors || {}),
+                        [sessionId]: 'Имя занято активным игроком'
+                    }
+                };
+            }
+
+            // Игрок с таким именем есть и он (offline/disconnected) ИЛИ это тот же sessionId. Восстанавливаем.
             const newPlayers = newState.players.map((p, i) => 
                 i === existingPlayerIndex
                 ? { ...p, sessionId: sessionId, status: 'online', lastSeen: Date.now() } // Обновляем SessionID и статус
                 : p
             );
-            return { ...newState, players: newPlayers, gameMessage: `${playerName} вернулся в игру.` };
+            
+            // Очищаем ошибку, если она была
+            const newJoinErrors = { ...(newState.joinErrors || {}) };
+            delete newJoinErrors[sessionId];
+
+            return { 
+                ...newState, 
+                players: newPlayers, 
+                joinErrors: newJoinErrors,
+                gameMessage: `${playerName} вернулся в игру.` 
+            };
         }
 
         // 2. Если имя новое, ищем свободный слот
@@ -60,13 +84,23 @@ function gameReducer(state, action) {
         const restoredScore = newState.leavers?.[playerName] || 0;
         const newLeavers = { ...newState.leavers };
         if (restoredScore > 0) delete newLeavers[playerName];
+        
+        // Очищаем ошибку, если она была
+        const newJoinErrors = { ...(newState.joinErrors || {}) };
+        delete newJoinErrors[sessionId];
 
         const newPlayers = newState.players.map((p, i) => 
             i === joinIndex 
             ? { ...p, name: playerName, isClaimed: true, scores: restoredScore > 0 ? [restoredScore] : [], status: 'online', sessionId, hasEnteredGame: restoredScore > 0, lastSeen: Date.now() } 
             : p
         );
-        return { ...newState, players: newPlayers, leavers: newLeavers, gameMessage: `${playerName} присоединился.` };
+        return { 
+            ...newState, 
+            players: newPlayers, 
+            leavers: newLeavers, 
+            joinErrors: newJoinErrors,
+            gameMessage: `${playerName} присоединился.` 
+        };
     }
 
     // Обработка автоматического отключения (Last Will)

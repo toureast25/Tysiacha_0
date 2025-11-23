@@ -131,6 +131,21 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
         )
       );
   }
+  
+  // --- RENDER JOIN ERROR (NAME TAKEN) ---
+  const joinError = gameState.joinErrors?.[mySessionIdRef.current];
+  if (joinError) {
+      return React.createElement('div', { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm" },
+          React.createElement('div', { className: "bg-slate-800 p-8 rounded-xl border border-red-500 max-w-md text-center shadow-2xl" },
+              React.createElement('h2', { className: "text-3xl font-ruslan text-red-500 mb-4" }, "Ошибка входа"),
+              React.createElement('p', { className: "text-white text-lg mb-6" }, joinError),
+              React.createElement('button', { 
+                  onClick: onExit,
+                  className: "px-6 py-3 bg-slate-600 hover:bg-slate-700 text-white rounded-lg font-bold transition-colors"
+              }, "Вернуться в меню")
+          )
+      );
+  }
 
   const isMyTurn = isLocalMode ? true : (myPlayerId === gameState.currentPlayerIndex && !isSpectator);
   
@@ -181,7 +196,7 @@ const Game = ({ roomCode, playerName, initialMode, localConfig, onExit }) => {
     onStartOfficialGame: () => sendAction({ type: 'START_OFFICIAL_GAME' }),
     onJoinGame: () => sendAction({ type: 'PLAYER_JOIN', payload: { playerName, sessionId: mySessionIdRef.current } }),
     onJoinRequest: () => {}, 
-    onToggleDieSelection: (index) => dispatch({ type: 'TOGGLE_DIE_SELECTION', payload: { index } }),
+    onToggleDieSelection: (index) => sendAction({ type: 'TOGGLE_DIE_SELECTION', payload: { index } }), // ENSURE sendAction is used
     onDragStart: (e, index) => { e.dataTransfer.setData('application/json', JSON.stringify([index])); },
     onDrop: (e) => { 
         e.preventDefault(); 
